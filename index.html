@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>YT Editor Workflow Pro - Perfect Input</title>
+    <title>YT Editor Workflow Pro - UI Optimized</title>
     <!-- 1. 核心樣式與框架 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -15,7 +15,7 @@
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-firestore-compat.js"></script>
 
     <style>
-        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap');
+        @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&family=JetBrains+Mono:wght@700&display=swap');
         body { 
             font-family: 'Inter', -apple-system, sans-serif; 
             background-color: #0a0a0a; 
@@ -31,20 +31,26 @@
         .mobile-card { background-color: #161616; border: 1px solid rgba(255,255,255,0.08); border-radius: 28px; }
         .btn-active:active { transform: scale(0.96); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
+        
+        /* 特別針對計時器數字微調 */
+        .timer-font {
+            font-family: 'JetBrains Mono', monospace;
+            letter-spacing: -0.02em;
+        }
     </style>
 </head>
 <body>
     <div id="root">
-        <div class="flex flex-col items-center justify-center h-screen space-y-4 text-slate-500">
+        <div class="flex flex-col items-center justify-center h-screen space-y-4 text-slate-500 text-center px-10">
             <div class="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse text-center px-10">引擎裝載中...</div>
+            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse">介面優化裝載中...</div>
         </div>
     </div>
 
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
-        // --- 100% 穩定的內嵌 SVG 圖標 ---
+        // --- 內嵌 SVG 圖標 ---
         const Icon = ({ name, size = 20, className = "", color = "currentColor", fill = "none" }) => {
             const icons = {
                 "trending-up": <path d="m22 7-8.5 8.5-5-5L2 17M22 7h-6M22 7v6"/>,
@@ -108,7 +114,6 @@
             const [sessionNote, setSessionNote] = useState('');
             const [sessionStartTime, setSessionStartTime] = useState(null);
 
-            // --- 核心優化：將數字初始值設為空白字串 ---
             const initialNewProject = { 
                 name: '', client: '', estHours: '', estIncome: '', cost: '', 
                 projectDate: new Date().toISOString().split('T')[0], deadline: '', notes: '' 
@@ -152,12 +157,11 @@
             };
 
             const addProject = async () => {
-                if (!user) { alert("等待雲端連線中..."); return; }
+                if (!user) { alert("等待連線中..."); return; }
                 if (!newProject.name || !newProject.client) { alert("請填寫標題與客戶！"); return; }
                 setIsAdding(true);
                 try {
                     const storageUid = syncKey ? `shared_${syncKey}` : user.uid;
-                    // 在儲存前才轉換數字
                     const projectToSave = {
                         ...newProject,
                         estHours: parseFloat(newProject.estHours) || 0,
@@ -204,32 +208,62 @@
                     {showSyncModal && (
                         <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-6 backdrop-blur-md">
                             <div className="mobile-card p-7 w-full max-w-xs space-y-5 shadow-2xl">
-                                <h2 className="text-white font-bold flex items-center gap-2"><Icon name="settings" size={20} color="#3b82f6"/> 跨裝置同步</h2>
+                                <h2 className="text-white font-bold flex items-center gap-2 text-lg"><Icon name="settings" size={20} color="#3b82f6"/> 跨裝置同步</h2>
                                 <input type="text" placeholder="輸入同步 ID" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none" value={syncKey} onChange={e => setSyncKey(e.target.value)} />
                                 <div className="flex gap-2"><button onClick={() => { localStorage.setItem('yt_editor_sync_id', syncKey); window.location.reload(); }} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-bold">儲存並重啟</button><button onClick={() => setShowSyncModal(false)} className="flex-1 py-4 bg-white/10 text-slate-300 rounded-2xl">關閉</button></div>
                             </div>
                         </div>
                     )}
 
-                    <div className="mobile-card p-6 space-y-6 shadow-2xl border-white/5 border-2">
+                    {/* Timer Section: 已優化寬度與間距 */}
+                    <div className="mobile-card p-4 sm:p-6 space-y-6 shadow-2xl border-white/5 border-2">
                         <div className="space-y-4">
                             <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase">執行專案</label><select className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white outline-none focus:ring-2 ring-blue-500 appearance-none" value={activeProjectId} onChange={e => setActiveProjectId(e.target.value)} disabled={isRunning}><option value="">-- 點選專案 --</option>{projects.map(p => <option key={p.id} value={p.id}>{p.client} | {p.name}</option>)}</select></div>
                             <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase">工作環節</label><div className="grid grid-cols-2 gap-2">{PHASES.map(ph => <button key={ph.id} onClick={() => setActivePhase(ph.id)} disabled={isRunning} style={activePhase === ph.id ? { borderColor: ph.color, backgroundColor: `${ph.color}20`, color: ph.color } : {}} className={`text-[11px] py-3.5 rounded-2xl border border-white/5 bg-white/5 text-slate-500 btn-active ${activePhase === ph.id ? 'font-bold' : ''}`}>{ph.name}</button>)}</div></div>
                         </div>
-                        <div className="text-center space-y-5 py-6 bg-black/40 rounded-[32px] border border-white/5 shadow-inner"><div className={`text-6xl font-mono font-bold timer-glow transition-all ${isRunning ? 'scale-105' : 'opacity-20'}`} style={{ color: isRunning ? currentPhaseColor : '#e2e8f0' }}>{formatTime(time)}</div><div className="px-5 space-y-3">{!isRunning ? <button onClick={startTimer} style={{ backgroundColor: activeProjectId ? currentPhaseColor : '#334155' }} className="w-full py-5 text-white rounded-[24px] font-bold text-xl btn-active flex items-center justify-center gap-3"><Icon name="play" fill="currentColor" size={24} /> 開始肝嚕！</button> : <button onClick={() => setIsRunning(false)} className="w-full py-5 bg-orange-600/90 text-white rounded-[24px] font-bold text-xl btn-active flex items-center justify-center gap-3"><Icon name="pause" fill="currentColor" size={24} /> 休息一下</button>}{time > 0 && <button onClick={stopTimer} className="w-full py-2 text-red-500 text-[11px] font-bold uppercase tracking-[0.3em]">完成並存檔</button>}</div></div>
-                        <div className="flex items-center gap-3 bg-black/30 p-4 rounded-2xl border border-white/5 shadow-inner"><Icon name="message-square" size={16} className="text-slate-600" /><input type="text" placeholder="本次筆記..." className="bg-transparent text-xs text-slate-300 outline-none w-full" value={sessionNote} onChange={e => setSessionNote(e.target.value)} /></div>
+                        
+                        {/* 計時器黑框：加大內距並微調數字尺寸 */}
+                        <div className="text-center space-y-5 py-8 px-2 sm:px-6 bg-black/40 rounded-[36px] border border-white/5 shadow-inner">
+                            <div 
+                                className={`timer-font text-5xl sm:text-6xl font-bold timer-glow transition-all duration-500 ${isRunning ? 'scale-105' : 'opacity-20'}`}
+                                style={{ color: isRunning ? currentPhaseColor : '#e2e8f0' }}
+                            >
+                                {formatTime(time)}
+                            </div>
+                            <div className="px-3 sm:px-5 space-y-3">
+                                {!isRunning ? (
+                                    <button 
+                                        onClick={startTimer} 
+                                        style={{ backgroundColor: activeProjectId ? currentPhaseColor : '#334155' }} 
+                                        className="w-full py-5 text-white rounded-[24px] font-bold text-lg sm:text-xl shadow-xl flex items-center justify-center gap-3 btn-active"
+                                    >
+                                        <Icon name="play" fill="currentColor" size={24} /> 開始肝嚕！
+                                    </button>
+                                ) : (
+                                    <button onClick={() => setIsRunning(false)} className="w-full py-5 bg-orange-600/90 text-white rounded-[24px] font-bold text-lg sm:text-xl btn-active flex items-center justify-center gap-3">
+                                        <Icon name="pause" fill="currentColor" size={24} /> 休息一下
+                                    </button>
+                                )}
+                                {time > 0 && <button onClick={stopTimer} className="w-full py-2 text-red-500 text-[11px] font-bold uppercase tracking-[0.3em]">結束並存檔</button>}
+                            </div>
+                        </div>
+                        
+                        <div className="flex items-center gap-3 bg-black/30 p-4 rounded-2xl border border-white/5 shadow-inner mx-1">
+                            <Icon name="message-square" size={16} className="text-slate-600" />
+                            <input type="text" placeholder="本次筆記..." className="bg-transparent text-xs text-slate-300 outline-none w-full" value={sessionNote} onChange={e => setSessionNote(e.target.value)} />
+                        </div>
                     </div>
 
                     <div className="grid grid-cols-2 gap-3">
-                        <div className="mobile-card p-5 flex flex-col justify-center items-center shadow-lg"><span className="text-[10px] text-slate-500 font-bold uppercase mb-1">本日肝片</span><span className="text-3xl font-bold text-orange-400 font-mono">{todayHours}h</span></div>
-                        <div className="mobile-card p-5 flex flex-col justify-center items-center shadow-lg"><span className="text-[10px] text-slate-500 font-bold uppercase mb-1">平均時薪</span><span className="text-3xl font-bold text-green-400 font-mono">${stats.length > 0 ? Math.round(stats.reduce((a, b) => a + b.actualHourlyRate, 0) / stats.length) : 0}/h</span></div>
+                        <div className="mobile-card p-5 flex flex-col justify-center items-center shadow-lg"><span className="text-[10px] text-slate-500 font-bold uppercase mb-1">本日肝片</span><span className="text-3xl font-bold text-orange-400 font-mono tracking-tighter">{todayHours}h</span></div>
+                        <div className="mobile-card p-5 flex flex-col justify-center items-center shadow-lg"><span className="text-[10px] text-slate-500 font-bold uppercase mb-1">平均時薪</span><span className="text-3xl font-bold text-green-400 font-mono tracking-tighter">${stats.length > 0 ? Math.round(stats.reduce((a, b) => a + b.actualHourlyRate, 0) / stats.length) : 0}/h</span></div>
                     </div>
 
                     <div className="space-y-4">
                         <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2"><Icon name="target" size={14} color="#ec4899" /> 專案成效分析</h2>
                         {stats.map(p => (
                             <div key={p.id} className="mobile-card p-6 space-y-5 shadow-2xl">
-                                <div className="flex justify-between items-start"><div className="space-y-2 max-w-[70%]"><div className="flex items-center gap-2"><span className="text-[9px] bg-blue-500/10 text-blue-400 font-bold px-2 py-0.5 rounded-lg uppercase border border-blue-500/20">{p.client}</span><span className="text-[9px] text-slate-600 font-mono">{p.projectDate.substring(5).replace('-', '/')}</span></div><h3 className="text-lg font-bold text-white leading-tight">{p.name}</h3></div><div className="text-right"><div className="text-xl font-bold text-green-400 font-mono">${Math.round(p.actualHourlyRate)}/h</div><div className="text-[8px] text-slate-500 font-bold uppercase tracking-tighter">Net: ${p.netIncome.toLocaleString()}</div></div></div>
+                                <div className="flex justify-between items-start"><div className="space-y-2 max-w-[70%]"><div className="flex items-center gap-2"><span className="text-[9px] bg-blue-500/10 text-blue-400 font-bold px-2 py-0.5 rounded-lg uppercase border border-blue-500/20">{p.client}</span><span className="text-[9px] text-slate-600 font-mono">{p.projectDate.substring(5).replace('-', '/')}</span></div><h3 className="text-lg font-bold text-white leading-tight">{p.name}</h3></div><div className="text-right"><div className="text-xl font-bold text-green-400 font-mono tracking-tighter">${Math.round(p.actualHourlyRate)}/h</div><div className="text-[8px] text-slate-500 font-bold uppercase tracking-tighter">Net: ${p.netIncome.toLocaleString()}</div></div></div>
                                 {p.recentWork.length > 0 && (
                                     <div className="bg-black/40 rounded-2xl p-4 space-y-2.5 border border-white/5 shadow-inner">
                                         {p.recentWork.map(l => {
@@ -239,7 +273,7 @@
                                     </div>
                                 )}
                                 <div className="space-y-4">
-                                    <div className="space-y-2"><div className="flex justify-between text-[10px] font-bold uppercase"><span className="text-slate-500">工時進度 ({p.actualHours.toFixed(1)} / {p.estHours}h)</span><span className={p.efficiency > 100 ? 'text-red-400' : 'text-blue-400'}>{p.efficiency.toFixed(0)}%</span></div><div className="h-2 bg-black rounded-full overflow-hidden border border-white/5 shadow-inner"><div className={`h-full transition-all duration-1000 ${p.efficiency > 100 ? 'bg-red-500' : 'bg-blue-600'}`} style={{ width: `${Math.min(p.efficiency, 100)}%` }} /></div></div>
+                                    <div className="space-y-2"><div className="flex justify-between text-[10px] font-bold uppercase"><span className="text-slate-500">時數進度 ({p.actualHours.toFixed(1)} / {p.estHours}h)</span><span className={p.efficiency > 100 ? 'text-red-400' : 'text-blue-400'}>{p.efficiency.toFixed(0)}%</span></div><div className="h-2 bg-black rounded-full overflow-hidden border border-white/5 shadow-inner"><div className={`h-full transition-all duration-1000 ${p.efficiency > 100 ? 'bg-red-500' : 'bg-blue-600'}`} style={{ width: `${Math.min(p.efficiency, 100)}%` }} /></div></div>
                                     <div className="grid grid-cols-2 gap-2">{p.phaseData.filter(ph => ph.percent > 0).map(ph => (<div key={ph.id} className="bg-black/20 p-2.5 rounded-xl flex items-center justify-between border border-white/5"><div className="flex items-center gap-2 overflow-hidden"><div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: ph.color }} /><span className="text-[10px] text-slate-400 truncate">{ph.name}</span></div><span className="text-[10px] font-mono font-bold" style={{ color: ph.color }}>{ph.percent.toFixed(0)}%</span></div>))}</div>
                                 </div>
                                 <div className="flex justify-between items-center pt-4 border-t border-white/5">
@@ -299,7 +333,7 @@
                             <button onClick={addProject} disabled={isAdding} className={`w-full py-5 rounded-[24px] font-bold text-lg shadow-xl btn-active mt-2 transition-all ${isAdding ? 'bg-slate-700 text-slate-400' : 'bg-blue-600 text-white'}`}>{isAdding ? '建立中...' : '建立計畫'}</button>
                         </div>
                     </div>
-                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v4.3 • Zero-First Input</footer>
+                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v4.4 • UI Polish</footer>
                 </div>
             );
         }
