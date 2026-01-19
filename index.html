@@ -94,7 +94,7 @@
             { id: 'grading', name: '調光字幕', color: '#f59e0b' },
             { id: 'upload', name: '縮圖上傳', color: '#ec4899' },
             { id: 'revision', name: '修改', color: '#f43f5e' },
-            { id: 'other', name: '其他 (註記)', color: '#64748b' }
+            { id: 'other', name: '其他', color: '#64748b' }
         ];
 
         function App() {
@@ -215,14 +215,13 @@
                         </div>
                     )}
 
-                    {/* Timer Section: 已優化寬度與間距 */}
+                    {/* Timer Section */}
                     <div className="mobile-card p-4 sm:p-6 space-y-6 shadow-2xl border-white/5 border-2">
                         <div className="space-y-4">
                             <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase">執行專案</label><select className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white outline-none focus:ring-2 ring-blue-500 appearance-none" value={activeProjectId} onChange={e => setActiveProjectId(e.target.value)} disabled={isRunning}><option value="">-- 點選專案 --</option>{projects.map(p => <option key={p.id} value={p.id}>{p.client} | {p.name}</option>)}</select></div>
                             <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase">工作環節</label><div className="grid grid-cols-2 gap-2">{PHASES.map(ph => <button key={ph.id} onClick={() => setActivePhase(ph.id)} disabled={isRunning} style={activePhase === ph.id ? { borderColor: ph.color, backgroundColor: `${ph.color}20`, color: ph.color } : {}} className={`text-[11px] py-3.5 rounded-2xl border border-white/5 bg-white/5 text-slate-500 btn-active ${activePhase === ph.id ? 'font-bold' : ''}`}>{ph.name}</button>)}</div></div>
                         </div>
                         
-                        {/* 計時器黑框：加大內距並微調數字尺寸 */}
                         <div className="text-center space-y-5 py-8 px-2 sm:px-6 bg-black/40 rounded-[36px] border border-white/5 shadow-inner">
                             <div 
                                 className={`timer-font text-5xl sm:text-6xl font-bold timer-glow transition-all duration-500 ${isRunning ? 'scale-105' : 'opacity-20'}`}
@@ -268,7 +267,19 @@
                                     <div className="bg-black/40 rounded-2xl p-4 space-y-2.5 border border-white/5 shadow-inner">
                                         {p.recentWork.map(l => {
                                             const ph = PHASES.find(x => x.id === l.phase);
-                                            return <div key={l.id} className="flex justify-between items-center text-[11px] font-mono border-b border-white/5 pb-2 last:border-0 last:pb-0"><div className="flex flex-col"><span className="font-bold" style={{ color: ph?.color || '#e2e8f0' }}>[{ph?.name || '未分類'}]</span><span className="text-slate-500 text-[9px]">{l.displayStartTime} - {l.displayEndTime}</span></div><div className="flex items-center gap-3"><span className="text-white font-bold">{Math.round(l.seconds / 60)}m</span><button onClick={() => {if(confirm("刪除這筆紀錄？")){ const storageUid = syncKey ? `shared_${syncKey}` : user.uid; db.collection(`artifacts/${appId}/users/${storageUid}/logs`).doc(l.id).delete(); }}} className="p-1.5 bg-red-500/10 text-red-500 rounded-lg"><Icon name="x" size={10} /></button></div></div>;
+                                            return (
+                                                <div key={l.id} className="flex justify-between items-center text-[11px] font-mono border-b border-white/5 pb-2 last:border-0 last:pb-0">
+                                                    <div className="flex flex-col flex-1 mr-4">
+                                                        <span className="font-bold" style={{ color: ph?.color || '#e2e8f0' }}>[{ph?.name || '未分類'}]</span>
+                                                        <span className="text-slate-500 text-[9px]">{l.displayStartTime} - {l.displayEndTime}</span>
+                                                        {l.note && <span className="text-[10px] text-slate-400 opacity-80 mt-0.5 italic">💬 {l.note}</span>}
+                                                    </div>
+                                                    <div className="flex items-center gap-3">
+                                                        <span className="text-white font-bold">{Math.round(l.seconds / 60)}m</span>
+                                                        <button onClick={() => {if(confirm("刪除這筆紀錄？")){ const storageUid = syncKey ? `shared_${syncKey}` : user.uid; db.collection(`artifacts/${appId}/users/${storageUid}/logs`).doc(l.id).delete(); }}} className="p-1.5 bg-red-500/10 text-red-500 rounded-lg"><Icon name="x" size={10} /></button>
+                                                    </div>
+                                                </div>
+                                            );
                                         })}
                                     </div>
                                 )}
@@ -333,7 +344,7 @@
                             <button onClick={addProject} disabled={isAdding} className={`w-full py-5 rounded-[24px] font-bold text-lg shadow-xl btn-active mt-2 transition-all ${isAdding ? 'bg-slate-700 text-slate-400' : 'bg-blue-600 text-white'}`}>{isAdding ? '建立中...' : '建立計畫'}</button>
                         </div>
                     </div>
-                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v4.4 • UI Polish</footer>
+                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v4.5 • Note Sync Ready</footer>
                 </div>
             );
         }
