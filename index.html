@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>YT Editor Workflow Pro - stable</title>
+    <title>YT Editor Workflow Pro - Perfect Input</title>
     <!-- 1. 核心樣式與框架 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -37,14 +37,14 @@
     <div id="root">
         <div class="flex flex-col items-center justify-center h-screen space-y-4 text-slate-500">
             <div class="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse text-center px-10">肝片引擎啟動中...</div>
+            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse text-center px-10">引擎裝載中...</div>
         </div>
     </div>
 
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
-        // --- 內嵌 SVG 圖標 (保證 100% 顯示) ---
+        // --- 100% 穩定的內嵌 SVG 圖標 ---
         const Icon = ({ name, size = 20, className = "", color = "currentColor", fill = "none" }) => {
             const icons = {
                 "trending-up": <path d="m22 7-8.5 8.5-5-5L2 17M22 7h-6M22 7v6"/>,
@@ -108,10 +108,12 @@
             const [sessionNote, setSessionNote] = useState('');
             const [sessionStartTime, setSessionStartTime] = useState(null);
 
-            const [newProject, setNewProject] = useState({ 
-                name: '', client: '', estHours: '8', estIncome: '2000', cost: '0', 
+            // --- 核心優化：將數字初始值設為空白字串 ---
+            const initialNewProject = { 
+                name: '', client: '', estHours: '', estIncome: '', cost: '', 
                 projectDate: new Date().toISOString().split('T')[0], deadline: '', notes: '' 
-            });
+            };
+            const [newProject, setNewProject] = useState(initialNewProject);
 
             useEffect(() => {
                 const unsubscribe = auth.onAuthStateChanged((u) => {
@@ -150,11 +152,12 @@
             };
 
             const addProject = async () => {
-                if (!user) { alert("等待雲端連線中，請稍候..."); return; }
+                if (!user) { alert("等待雲端連線中..."); return; }
                 if (!newProject.name || !newProject.client) { alert("請填寫標題與客戶！"); return; }
                 setIsAdding(true);
                 try {
                     const storageUid = syncKey ? `shared_${syncKey}` : user.uid;
+                    // 在儲存前才轉換數字
                     const projectToSave = {
                         ...newProject,
                         estHours: parseFloat(newProject.estHours) || 0,
@@ -163,11 +166,10 @@
                         createdAt: new Date().toISOString()
                     };
                     await db.collection(`artifacts/${appId}/users/${storageUid}/projects`).add(projectToSave);
-                    setNewProject({ name: '', client: '', estHours: '8', estIncome: '2000', cost: '0', projectDate: new Date().toISOString().split('T')[0], deadline: '', notes: '' });
+                    setNewProject(initialNewProject);
                     alert("建立成功！");
-                } catch (err) {
-                    alert("建立失敗！\n錯誤原因：" + err.code);
-                } finally { setIsAdding(false); }
+                } catch (err) { alert("建立失敗: " + err.code); } 
+                finally { setIsAdding(false); }
             };
 
             const stats = useMemo(() => {
@@ -189,7 +191,7 @@
             const currentPhaseColor = useMemo(() => PHASES.find(p => p.id === activePhase)?.color || '#3b82f6', [activePhase]);
 
             if (isLoading && !user) {
-                return <div className="flex flex-col items-center justify-center h-screen space-y-4 text-slate-500"><div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div><div>正在連線至您的 Firebase...</div></div>;
+                return <div className="flex flex-col items-center justify-center h-screen space-y-4 text-slate-500"><div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div><div>連線至雲端資料庫...</div></div>;
             }
 
             return (
@@ -214,7 +216,7 @@
                             <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase">執行專案</label><select className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white outline-none focus:ring-2 ring-blue-500 appearance-none" value={activeProjectId} onChange={e => setActiveProjectId(e.target.value)} disabled={isRunning}><option value="">-- 點選專案 --</option>{projects.map(p => <option key={p.id} value={p.id}>{p.client} | {p.name}</option>)}</select></div>
                             <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase">工作環節</label><div className="grid grid-cols-2 gap-2">{PHASES.map(ph => <button key={ph.id} onClick={() => setActivePhase(ph.id)} disabled={isRunning} style={activePhase === ph.id ? { borderColor: ph.color, backgroundColor: `${ph.color}20`, color: ph.color } : {}} className={`text-[11px] py-3.5 rounded-2xl border border-white/5 bg-white/5 text-slate-500 btn-active ${activePhase === ph.id ? 'font-bold' : ''}`}>{ph.name}</button>)}</div></div>
                         </div>
-                        <div className="text-center space-y-5 py-6 bg-black/40 rounded-[32px] border border-white/5 shadow-inner"><div className={`text-6xl font-mono font-bold timer-glow transition-all ${isRunning ? 'scale-105' : 'opacity-20'}`} style={{ color: isRunning ? currentPhaseColor : '#e2e8f0' }}>{formatTime(time)}</div><div className="px-5 space-y-3">{!isRunning ? <button onClick={startTimer} style={{ backgroundColor: activeProjectId ? currentPhaseColor : '#334155' }} className="w-full py-5 text-white rounded-[24px] font-bold text-xl shadow-xl flex items-center justify-center gap-3 btn-active"><Icon name="play" fill="currentColor" size={24} /> 開始肝嚕！</button> : <button onClick={() => setIsRunning(false)} className="w-full py-5 bg-orange-600/90 text-white rounded-[24px] font-bold text-xl btn-active flex items-center justify-center gap-3"><Icon name="pause" fill="currentColor" size={24} /> 休息一下</button>}{time > 0 && <button onClick={stopTimer} className="w-full py-2 text-red-500 text-[11px] font-bold uppercase tracking-[0.3em]">結束存檔</button>}</div></div>
+                        <div className="text-center space-y-5 py-6 bg-black/40 rounded-[32px] border border-white/5 shadow-inner"><div className={`text-6xl font-mono font-bold timer-glow transition-all ${isRunning ? 'scale-105' : 'opacity-20'}`} style={{ color: isRunning ? currentPhaseColor : '#e2e8f0' }}>{formatTime(time)}</div><div className="px-5 space-y-3">{!isRunning ? <button onClick={startTimer} style={{ backgroundColor: activeProjectId ? currentPhaseColor : '#334155' }} className="w-full py-5 text-white rounded-[24px] font-bold text-xl btn-active flex items-center justify-center gap-3"><Icon name="play" fill="currentColor" size={24} /> 開始肝嚕！</button> : <button onClick={() => setIsRunning(false)} className="w-full py-5 bg-orange-600/90 text-white rounded-[24px] font-bold text-xl btn-active flex items-center justify-center gap-3"><Icon name="pause" fill="currentColor" size={24} /> 休息一下</button>}{time > 0 && <button onClick={stopTimer} className="w-full py-2 text-red-500 text-[11px] font-bold uppercase tracking-[0.3em]">完成並存檔</button>}</div></div>
                         <div className="flex items-center gap-3 bg-black/30 p-4 rounded-2xl border border-white/5 shadow-inner"><Icon name="message-square" size={16} className="text-slate-600" /><input type="text" placeholder="本次筆記..." className="bg-transparent text-xs text-slate-300 outline-none w-full" value={sessionNote} onChange={e => setSessionNote(e.target.value)} /></div>
                     </div>
 
@@ -224,10 +226,10 @@
                     </div>
 
                     <div className="space-y-4">
-                        <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2"><Icon name="target" size={14} color="#ec4899" /> 專案分析</h2>
+                        <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2"><Icon name="target" size={14} color="#ec4899" /> 專案成效分析</h2>
                         {stats.map(p => (
                             <div key={p.id} className="mobile-card p-6 space-y-5 shadow-2xl">
-                                <div className="flex justify-between items-start"><div className="space-y-2 max-w-[70%]"><div className="flex items-center gap-2"><span className="text-[9px] bg-blue-500/10 text-blue-400 font-bold px-2 py-0.5 rounded-lg uppercase border border-blue-500/20">{p.client}</span><span className="text-[9px] text-slate-600 font-mono">{p.projectDate.substring(5).replace('-', '/')}</span></div><h3 className="text-lg font-bold text-white leading-tight">{p.name}</h3></div><div className="text-right"><div className="text-xl font-bold text-green-400 font-mono">${Math.round(p.actualHourlyRate)}/h</div><div className="text-[8px] text-slate-500 font-bold uppercase">Net: ${p.netIncome.toLocaleString()}</div></div></div>
+                                <div className="flex justify-between items-start"><div className="space-y-2 max-w-[70%]"><div className="flex items-center gap-2"><span className="text-[9px] bg-blue-500/10 text-blue-400 font-bold px-2 py-0.5 rounded-lg uppercase border border-blue-500/20">{p.client}</span><span className="text-[9px] text-slate-600 font-mono">{p.projectDate.substring(5).replace('-', '/')}</span></div><h3 className="text-lg font-bold text-white leading-tight">{p.name}</h3></div><div className="text-right"><div className="text-xl font-bold text-green-400 font-mono">${Math.round(p.actualHourlyRate)}/h</div><div className="text-[8px] text-slate-500 font-bold uppercase tracking-tighter">Net: ${p.netIncome.toLocaleString()}</div></div></div>
                                 {p.recentWork.length > 0 && (
                                     <div className="bg-black/40 rounded-2xl p-4 space-y-2.5 border border-white/5 shadow-inner">
                                         {p.recentWork.map(l => {
@@ -237,8 +239,8 @@
                                     </div>
                                 )}
                                 <div className="space-y-4">
-                                    <div className="space-y-2"><div className="flex justify-between text-[10px] font-bold uppercase"><span className="text-slate-500">工時進度 ({p.actualHours.toFixed(1)} / {p.estHours}h)</span><span className={p.efficiency > 100 ? 'text-red-400' : 'text-blue-400'}>{p.efficiency.toFixed(0)}%</span></div><div className="h-2 bg-black rounded-full overflow-hidden border border-white/5"><div className={`h-full transition-all duration-1000 ${p.efficiency > 100 ? 'bg-red-500' : 'bg-blue-600'}`} style={{ width: `${Math.min(p.efficiency, 100)}%` }} /></div></div>
-                                    <div className="grid grid-cols-2 gap-2">{p.phaseData.filter(ph => ph.percent > 0).map(ph => (<div key={ph.id} className="bg-black/20 p-2.5 rounded-xl flex items-center justify-between border border-white/5"><div className="flex items-center gap-2"><div className="w-1.5 h-1.5 rounded-full" style={{ backgroundColor: ph.color }} /><span className="text-[10px] text-slate-400 truncate">{ph.name}</span></div><span className="text-[10px] font-mono font-bold" style={{ color: ph.color }}>{ph.percent.toFixed(0)}%</span></div>))}</div>
+                                    <div className="space-y-2"><div className="flex justify-between text-[10px] font-bold uppercase"><span className="text-slate-500">工時進度 ({p.actualHours.toFixed(1)} / {p.estHours}h)</span><span className={p.efficiency > 100 ? 'text-red-400' : 'text-blue-400'}>{p.efficiency.toFixed(0)}%</span></div><div className="h-2 bg-black rounded-full overflow-hidden border border-white/5 shadow-inner"><div className={`h-full transition-all duration-1000 ${p.efficiency > 100 ? 'bg-red-500' : 'bg-blue-600'}`} style={{ width: `${Math.min(p.efficiency, 100)}%` }} /></div></div>
+                                    <div className="grid grid-cols-2 gap-2">{p.phaseData.filter(ph => ph.percent > 0).map(ph => (<div key={ph.id} className="bg-black/20 p-2.5 rounded-xl flex items-center justify-between border border-white/5"><div className="flex items-center gap-2 overflow-hidden"><div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: ph.color }} /><span className="text-[10px] text-slate-400 truncate">{ph.name}</span></div><span className="text-[10px] font-mono font-bold" style={{ color: ph.color }}>{ph.percent.toFixed(0)}%</span></div>))}</div>
                                 </div>
                                 <div className="flex justify-between items-center pt-4 border-t border-white/5">
                                     {p.deadline ? (
@@ -246,17 +248,7 @@
                                             <Icon name="calendar" size={12} /> {p.deadline.substring(5)} ({p.daysLeft}天)
                                         </span>
                                     ) : <div />}
-                                    <button 
-                                        onClick={async () => { 
-                                            if(confirm("徹底刪除專案？")) { 
-                                                const storageUid = syncKey ? `shared_${syncKey}` : user.uid; 
-                                                await db.collection(`artifacts/${appId}/users/${storageUid}/projects`).doc(p.id).delete(); 
-                                            } 
-                                        }} 
-                                        className="p-2.5 text-slate-700 hover:text-red-500 rounded-xl btn-active"
-                                    >
-                                        <Icon name="trash-2" size={18}/>
-                                    </button>
+                                    <button onClick={async () => { if(confirm("徹底刪除專案與數據？")) { const storageUid = syncKey ? `shared_${syncKey}` : user.uid; await db.collection(`artifacts/${appId}/users/${storageUid}/projects`).doc(p.id).delete(); } }} className="p-2.5 text-slate-700 hover:text-red-500 rounded-xl btn-active"><Icon name="trash-2" size={18}/></button>
                                 </div>
                             </div>
                         ))}
@@ -265,15 +257,16 @@
                     <div className="mobile-card p-7 space-y-6 shadow-2xl border-white/5">
                         <h3 className="text-lg font-bold text-white flex items-center gap-3"><Icon name="plus" size={20} color="#3b82f6"/> 新增剪輯計畫</h3>
                         <div className="space-y-5">
-                            <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase px-1">影片標題 (必填)</label><input type="text" placeholder="影片名稱" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none focus:border-blue-500" value={newProject.name} onChange={e => setNewProject({...newProject, name: e.target.value})} /></div>
-                            <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase px-1">客戶名稱 (必填)</label><input type="text" placeholder="客戶名" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none focus:border-blue-500" value={newProject.client} onChange={e => setNewProject({...newProject, client: e.target.value})} /></div>
+                            <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase px-1 tracking-widest">影片標題 (必填)</label><input type="text" placeholder="影片名稱" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none focus:border-blue-500 shadow-inner" value={newProject.name} onChange={e => setNewProject({...newProject, name: e.target.value})} /></div>
+                            <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase px-1 tracking-widest">客戶名稱 (必填)</label><input type="text" placeholder="客戶名" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none focus:border-blue-500 shadow-inner" value={newProject.client} onChange={e => setNewProject({...newProject, client: e.target.value})} /></div>
                             
                             <div className="grid grid-cols-2 gap-4">
                                 <div className="space-y-1.5">
                                     <label className="text-[10px] text-slate-500 font-bold uppercase px-1">預估收益</label>
                                     <input 
                                         type="number" 
-                                        className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none" 
+                                        placeholder="NTD"
+                                        className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" 
                                         value={newProject.estIncome} 
                                         onChange={e => setNewProject({...newProject, estIncome: e.target.value})} 
                                     />
@@ -282,7 +275,8 @@
                                     <label className="text-[10px] text-slate-500 font-bold uppercase px-1">額外成本</label>
                                     <input 
                                         type="number" 
-                                        className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none" 
+                                        placeholder="NTD"
+                                        className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" 
                                         value={newProject.cost} 
                                         onChange={e => setNewProject({...newProject, cost: e.target.value})} 
                                     />
@@ -295,7 +289,8 @@
                                 <label className="text-[10px] text-slate-500 font-bold uppercase px-1">預計總時數 (h)</label>
                                 <input 
                                     type="number" 
-                                    className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none" 
+                                    placeholder="小時"
+                                    className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" 
                                     value={newProject.estHours} 
                                     onChange={e => setNewProject({...newProject, estHours: e.target.value})} 
                                 />
@@ -304,7 +299,7 @@
                             <button onClick={addProject} disabled={isAdding} className={`w-full py-5 rounded-[24px] font-bold text-lg shadow-xl btn-active mt-2 transition-all ${isAdding ? 'bg-slate-700 text-slate-400' : 'bg-blue-600 text-white'}`}>{isAdding ? '建立中...' : '建立計畫'}</button>
                         </div>
                     </div>
-                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v4.2 • Syntax Fixed</footer>
+                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v4.3 • Zero-First Input</footer>
                 </div>
             );
         }
