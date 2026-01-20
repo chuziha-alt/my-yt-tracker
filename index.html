@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>YT Editor Workflow Pro - Persistence</title>
+    <title>YT Editor Workflow Pro - Cloud Sync</title>
     <!-- 1. 核心樣式與框架 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -38,14 +38,14 @@
     <div id="root">
         <div class="flex flex-col items-center justify-center h-screen space-y-4 text-slate-500 text-center px-10">
             <div class="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse">正在從雲端恢復計時進度...</div>
+            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse">正在連接大師雲端資料庫...</div>
         </div>
     </div>
 
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
 
-        // --- 全域工具：時間格式化 ---
+        // --- 全域工具函數 ---
         const formatTime = (seconds) => {
             const h = Math.floor(seconds / 3600);
             const m = Math.floor((seconds % 3600) / 60);
@@ -53,7 +53,7 @@
             return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
         };
 
-        // --- 穩定內嵌 SVG 圖標組件 ---
+        // --- 100% 穩定內嵌 SVG 圖標組件 ---
         const Icon = ({ name, size = 20, className = "", color = "currentColor", fill = "none" }) => {
             const icons = {
                 "trending-up": <path d="m22 7-8.5 8.5-5-5L2 17M22 7h-6M22 7v6"/>,
@@ -113,9 +113,9 @@
             const [logs, setLogs] = useState([]);
             const [now, setNow] = useState(new Date());
 
-            // --- 精準雲端計時核心變數 ---
+            // --- 精準雲端續秒核心變數 ---
             const [displaySeconds, setDisplaySeconds] = useState(0); 
-            const [activeSession, setActiveSession] = useState(null); // 從雲端讀取的狀態
+            const [activeSession, setActiveSession] = useState(null); 
 
             const [activeProjectId, setActiveProjectId] = useState('');
             const [activePhase, setActivePhase] = useState(PHASES[0].id);
@@ -131,7 +131,6 @@
                 projectDate: new Date().toISOString().split('T')[0], deadline: '', notes: '' 
             };
             const [newProject, setNewProject] = useState(initialNewProject);
-            const wakeLock = useRef(null);
 
             useEffect(() => {
                 const unsubscribe = auth.onAuthStateChanged((u) => {
@@ -150,11 +149,12 @@
                 const unsubP = db.collection(`${userPath}/projects`).onSnapshot(snap => setProjects(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
                 const unsubL = db.collection(`${userPath}/logs`).onSnapshot(snap => setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
                 
-                // 核心：監聽雲端目前的計時狀態 (activeSession)
+                // 雲端續秒關鍵：監聽雲端目前的計時工作 session
                 const unsubS = db.collection(`${userPath}/activeSession`).doc('current').onSnapshot(doc => {
                     if (doc.exists) {
                         const data = doc.data();
                         setActiveSession(data);
+                        // 自動同步 UI 狀態
                         setActiveProjectId(data.projectId);
                         setActivePhase(data.phase);
                         setSessionNote(data.note || '');
@@ -166,12 +166,12 @@
                 return () => { unsubP(); unsubL(); unsubS(); };
             }, [user, syncKey]);
 
-            // 每秒更新一次畫面顯示的時間 (不論是否在背景，重開即校正)
+            // 強制心跳機制：每秒根據雲端時間戳記校準一次畫面秒數
             useEffect(() => {
                 const itv = setInterval(() => {
                     if (activeSession && activeSession.isRunning) {
-                        const elapsed = Math.floor((Date.now() - activeSession.startTime) / 1000);
-                        setDisplaySeconds(activeSession.baseTime + elapsed);
+                        const elapsedSinceCloudStart = Math.floor((Date.now() - activeSession.startTime) / 1000);
+                        setDisplaySeconds(activeSession.baseTime + elapsedSinceCloudStart);
                     } else {
                         setDisplaySeconds(activeSession?.baseTime || 0);
                     }
@@ -187,10 +187,11 @@
                     phase: activePhase,
                     isRunning: true,
                     startTime: Date.now(),
-                    baseTime: displaySeconds, // 從當前秒數繼續
+                    baseTime: displaySeconds, // 從當前秒數繼續加
                     note: sessionNote,
                     sessionStartTimeStr: activeSession?.sessionStartTimeStr || new Date().toISOString()
                 };
+                // 將「啟動時間」同步到雲端，這樣即便關掉網頁，雲端依然記得何時開始的
                 await db.collection(`artifacts/${appId}/users/${storageUid}/activeSession`).doc('current').set(sessionData);
             };
 
@@ -279,7 +280,7 @@
 
             const currentPhaseColor = useMemo(() => PHASES.find(p => p.id === activePhase)?.color || '#3b82f6', [activePhase]);
 
-            if (isLoading && !user) return <div className="flex items-center justify-center h-screen text-slate-500 font-mono animate-pulse text-xs tracking-widest uppercase">Connecting to Master Cloud...</div>;
+            if (isLoading && !user) return <div className="flex items-center justify-center h-screen text-slate-500 font-mono animate-pulse text-xs tracking-widest uppercase">Connecting to Cloud...</div>;
 
             return (
                 <div className="max-w-md mx-auto px-4 py-6 space-y-6 pb-24">
@@ -312,7 +313,7 @@
                                 {displaySeconds > 0 && <button onClick={stopTimer} className="w-full py-2 text-red-500 text-[11px] font-bold uppercase tracking-[0.3em] opacity-80 hover:opacity-100">結束並存檔</button>}
                             </div>
                         </div>
-                        <div className="flex items-center gap-3 bg-black/30 p-4 rounded-2xl border border-white/5 mx-1 shadow-inner"><Icon name="message-square" size={16} className="text-slate-600" /><input type="text" placeholder="本次筆記 (隨時可打)..." className="bg-transparent text-xs text-slate-300 outline-none w-full" value={sessionNote} onChange={e => setSessionNote(e.target.value)} /></div>
+                        <div className="flex items-center gap-3 bg-black/30 p-4 rounded-2xl border border-white/5 mx-1 shadow-inner"><Icon name="message-square" size={16} className="text-slate-600" /><input type="text" placeholder="本次筆記 (隨時可打)..." className="bg-transparent text-xs text-slate-300 outline-none w-full placeholder-slate-700" value={sessionNote} onChange={e => setSessionNote(e.target.value)} /></div>
                     </div>
 
                     <div className="grid grid-cols-3 gap-2">
@@ -324,16 +325,19 @@
                     <div className="space-y-4">
                         <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2"><Icon name="target" size={14} color="#ec4899" /> 專案成效分析</h2>
                         {stats.map(p => (
-                            <div key={p.id} className="mobile-card p-6 space-y-5 shadow-2xl">
+                            <div key={p.id} className="mobile-card p-6 space-y-5 shadow-2xl transition-all">
                                 <div className="flex justify-between items-start">
-                                    <div className="space-y-2 max-w-[65%]"><div className="flex items-center gap-2"><span className="text-[9px] bg-blue-500/10 text-blue-400 font-bold px-2 py-0.5 rounded-lg border border-blue-500/20">{p.client}</span><span className="text-[9px] text-slate-600 font-mono">{p.projectDate.substring(5).replace('-', '/')}</span></div><h3 className="text-lg font-bold text-white leading-tight">{p.name}</h3></div>
+                                    <div className="space-y-2 max-w-[65%]">
+                                        <div className="flex items-center gap-2"><span className="text-[9px] bg-blue-500/10 text-blue-400 font-bold px-2 py-0.5 rounded-lg border border-blue-500/20">{p.client}</span><span className="text-[9px] text-slate-600 font-mono">{p.projectDate.substring(5).replace('-', '/')}</span></div>
+                                        <h3 className="text-lg font-bold text-white leading-tight">{p.name}</h3>
+                                    </div>
                                     <div className="text-right flex flex-col items-end">
                                         <div className="text-xl font-bold text-green-400 font-mono tracking-tighter">${Math.round(p.actualHourlyRate)}/h</div>
                                         <div className="flex flex-col items-end gap-0.5 mt-1">
                                             {editingIncomeId === p.id ? (
                                                 <div className="flex items-center gap-1 bg-black/50 p-1 rounded-lg border border-blue-500/50"><input type="number" autoFocus className="w-16 bg-transparent text-[10px] text-white outline-none font-bold" value={tempIncome} onChange={e => setTempIncome(e.target.value)} onBlur={() => saveNewIncome(p.id)} onKeyDown={e => e.key === 'Enter' && saveNewIncome(p.id)} /><button onClick={() => saveNewIncome(p.id)} className="text-green-500"><Icon name="check" size={12}/></button></div>
                                             ) : (
-                                                <div className="flex items-center gap-1 cursor-pointer hover:opacity-80" onClick={() => { setEditingIncomeId(p.id); setTempIncome(p.estIncome); }}><span className="text-[9px] text-slate-400 font-bold uppercase">預估收入: ${p.estIncome.toLocaleString()}</span><Icon name="edit" size={10} className="text-slate-700"/></div>
+                                                <div className="flex items-center gap-1 cursor-pointer hover:opacity-80 group" onClick={() => { setEditingIncomeId(p.id); setTempIncome(p.estIncome); }}><span className="text-[9px] text-slate-400 font-bold uppercase">預估收入: ${p.estIncome.toLocaleString()}</span><Icon name="edit" size={10} className="text-slate-700 group-hover:text-blue-500"/></div>
                                             )}
                                             <span className="text-[9px] text-slate-600 font-bold uppercase tracking-tighter">淨利: ${p.netIncome.toLocaleString()}</span>
                                         </div>
@@ -355,7 +359,8 @@
                                 )}
                                 <div className="space-y-4">
                                     <div className="space-y-2">
-                                        <div className="flex justify-between text-[10px] font-bold uppercase"><span className="text-slate-500 flex items-center gap-1">投入: {p.actualHours.toFixed(1)}h / {editingHoursId === p.id ? (<span className="inline-flex items-center gap-1 bg-black/50 px-1 rounded border border-blue-500/50"><input type="number" autoFocus className="w-10 bg-transparent text-white outline-none font-mono" value={tempHours} onChange={e => setTempHours(e.target.value)} onBlur={() => saveNewHours(p.id)} onKeyDown={e => e.key === 'Enter' && saveNewHours(p.id)} /><button onClick={() => saveNewHours(p.id)} className="text-green-500"><Icon name="check" size={10}/></button></span>) : (<span className="cursor-pointer hover:text-blue-400 inline-flex items-center gap-1" onClick={() => { setEditingHoursId(p.id); setTempHours(p.estHours); }}>預計: {p.estHours}h <Icon name="edit" size={8} className="text-slate-700"/></span>)}</span><span className={p.efficiency > 100 ? 'text-red-400' : 'text-blue-400'}>{p.efficiency.toFixed(0)}%</span></div>
+                                        <div className="flex justify-between text-[10px] font-bold uppercase">
+                                            <span className="text-slate-500 flex items-center gap-1">投入: {p.actualHours.toFixed(1)}h / {editingHoursId === p.id ? (<span className="inline-flex items-center gap-1 bg-black/50 px-1 rounded border border-blue-500/50"><input type="number" autoFocus className="w-10 bg-transparent text-white outline-none font-mono" value={tempHours} onChange={e => setTempHours(e.target.value)} onBlur={() => saveNewHours(p.id)} onKeyDown={e => e.key === 'Enter' && saveNewHours(p.id)} /><button onClick={() => saveNewHours(p.id)} className="text-green-500"><Icon name="check" size={10}/></button></span>) : (<span className="cursor-pointer hover:text-blue-400 inline-flex items-center gap-1 group" onClick={() => { setEditingHoursId(p.id); setTempHours(p.estHours); }}>預計: {p.estHours}h <Icon name="edit" size={8} className="text-slate-700 group-hover:text-blue-500"/></span>)}</span><span className={p.efficiency > 100 ? 'text-red-400' : 'text-blue-400'}>{p.efficiency.toFixed(0)}%</span></div>
                                         <div className="h-2 bg-black rounded-full overflow-hidden border border-white/5"><div className={`h-full transition-all duration-1000 ${p.efficiency > 100 ? 'bg-red-500' : 'bg-blue-600'}`} style={{ width: `${Math.min(p.efficiency, 100)}%` }} /></div>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2 mt-4">{p.phaseData.filter(ph => ph.percent > 0).map(ph => (<div key={ph.id} className="bg-black/20 p-2.5 rounded-xl flex items-center justify-between border border-white/5"><div className="flex items-center gap-2 overflow-hidden"><div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: ph.color }} /><span className="text-[10px] text-slate-400 truncate">{ph.name}</span></div><span className="text-[10px] font-mono font-bold" style={{ color: ph.color }}>{ph.percent.toFixed(0)}%</span></div>))}</div>
@@ -382,7 +387,7 @@
                             <button onClick={addProject} className="w-full py-5 rounded-[24px] font-bold text-lg shadow-xl btn-active mt-2 bg-blue-600 text-white transition-all">建立計畫</button>
                         </div>
                     </div>
-                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v5.5 • Cloud Auto-Resume Ready</footer>
+                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v5.6 • Persistence Engine Ready</footer>
                 </div>
             );
         }
