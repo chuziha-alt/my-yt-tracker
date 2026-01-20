@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>YT Editor Workflow Pro - Cloud Sync</title>
+    <title>YT Editor Workflow Pro - Auto-Save</title>
     <!-- 1. 核心樣式與框架 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -38,14 +38,14 @@
     <div id="root">
         <div class="flex flex-col items-center justify-center h-screen space-y-4 text-slate-500 text-center px-10">
             <div class="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse">正在連接大師雲端資料庫...</div>
+            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse">大師雲端同步中...</div>
         </div>
     </div>
 
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
 
-        // --- 全域工具函數 ---
+        // --- 全域工具函數：時間格式化 ---
         const formatTime = (seconds) => {
             const h = Math.floor(seconds / 3600);
             const m = Math.floor((seconds % 3600) / 60);
@@ -113,7 +113,7 @@
             const [logs, setLogs] = useState([]);
             const [now, setNow] = useState(new Date());
 
-            // --- 精準雲端續秒核心變數 ---
+            // --- 精準雲端續秒變數 ---
             const [displaySeconds, setDisplaySeconds] = useState(0); 
             const [activeSession, setActiveSession] = useState(null); 
 
@@ -131,6 +131,7 @@
                 projectDate: new Date().toISOString().split('T')[0], deadline: '', notes: '' 
             };
             const [newProject, setNewProject] = useState(initialNewProject);
+            const wakeLock = useRef(null);
 
             useEffect(() => {
                 const unsubscribe = auth.onAuthStateChanged((u) => {
@@ -149,15 +150,23 @@
                 const unsubP = db.collection(`${userPath}/projects`).onSnapshot(snap => setProjects(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
                 const unsubL = db.collection(`${userPath}/logs`).onSnapshot(snap => setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
                 
-                // 雲端續秒關鍵：監聽雲端目前的計時工作 session
+                // 雲端監聽：讀取計時狀態
                 const unsubS = db.collection(`${userPath}/activeSession`).doc('current').onSnapshot(doc => {
                     if (doc.exists) {
                         const data = doc.data();
                         setActiveSession(data);
-                        // 自動同步 UI 狀態
                         setActiveProjectId(data.projectId);
                         setActivePhase(data.phase);
                         setSessionNote(data.note || '');
+                        
+                        // --- 重點功能：自動結算過期暫停 ---
+                        if (!data.isRunning && data.pausedAt) {
+                            const pauseDuration = Date.now() - data.pausedAt;
+                            if (pauseDuration > 600000) { // 10 分鐘 = 600,000 毫秒
+                                console.log("暫停超過10分鐘，執行自動結算存檔...");
+                                autoFinalizeSession(data, storageUid);
+                            }
+                        }
                     } else {
                         setActiveSession(null);
                     }
@@ -166,12 +175,12 @@
                 return () => { unsubP(); unsubL(); unsubS(); };
             }, [user, syncKey]);
 
-            // 強制心跳機制：每秒根據雲端時間戳記校準一次畫面秒數
+            // 定時校準顯示秒數
             useEffect(() => {
                 const itv = setInterval(() => {
                     if (activeSession && activeSession.isRunning) {
-                        const elapsedSinceCloudStart = Math.floor((Date.now() - activeSession.startTime) / 1000);
-                        setDisplaySeconds(activeSession.baseTime + elapsedSinceCloudStart);
+                        const elapsed = Math.floor((Date.now() - activeSession.startTime) / 1000);
+                        setDisplaySeconds(activeSession.baseTime + elapsed);
                     } else {
                         setDisplaySeconds(activeSession?.baseTime || 0);
                     }
@@ -179,19 +188,33 @@
                 return () => clearInterval(itv);
             }, [activeSession]);
 
+            // 自動結算存檔邏輯
+            const autoFinalizeSession = async (sessionData, storageUid) => {
+                const finalSec = sessionData.baseTime;
+                if (finalSec <= 0) {
+                    await db.collection(`artifacts/${appId}/users/${storageUid}/activeSession`).doc('current').delete();
+                    return;
+                }
+                const logData = { 
+                    projectId: sessionData.projectId, phase: sessionData.phase, 
+                    note: (sessionData.note || "") + " (系統自動結算)", 
+                    seconds: finalSec, date: new Date().toISOString(), timestamp: Date.now(),
+                    displayStartTime: new Date(sessionData.sessionStartTimeStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    displayEndTime: new Date(sessionData.pausedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                };
+                await db.collection(`artifacts/${appId}/users/${storageUid}/logs`).add(logData);
+                await db.collection(`artifacts/${appId}/users/${storageUid}/activeSession`).doc('current').delete();
+                setDisplaySeconds(0);
+            };
+
             const startTimer = async () => { 
                 if (!activeProjectId) { alert("請先選擇專案！"); return; } 
                 const storageUid = syncKey ? `shared_${syncKey}` : user.uid;
                 const sessionData = {
-                    projectId: activeProjectId,
-                    phase: activePhase,
-                    isRunning: true,
-                    startTime: Date.now(),
-                    baseTime: displaySeconds, // 從當前秒數繼續加
-                    note: sessionNote,
+                    projectId: activeProjectId, phase: activePhase, isRunning: true,
+                    startTime: Date.now(), baseTime: displaySeconds, note: sessionNote,
                     sessionStartTimeStr: activeSession?.sessionStartTimeStr || new Date().toISOString()
                 };
-                // 將「啟動時間」同步到雲端，這樣即便關掉網頁，雲端依然記得何時開始的
                 await db.collection(`artifacts/${appId}/users/${storageUid}/activeSession`).doc('current').set(sessionData);
             };
 
@@ -201,7 +224,8 @@
                 const elapsed = Math.floor((Date.now() - activeSession.startTime) / 1000);
                 await db.collection(`artifacts/${appId}/users/${storageUid}/activeSession`).doc('current').update({
                     isRunning: false,
-                    baseTime: activeSession.baseTime + elapsed
+                    baseTime: activeSession.baseTime + elapsed,
+                    pausedAt: Date.now() // 記錄暫停時刻供自動化檢測
                 });
             };
 
@@ -214,12 +238,8 @@
                 
                 const endTime = new Date();
                 const logData = { 
-                    projectId: activeSession.projectId, 
-                    phase: activeSession.phase, 
-                    note: sessionNote, 
-                    seconds: finalSec, 
-                    date: new Date().toISOString(), 
-                    timestamp: Date.now(), 
+                    projectId: activeSession.projectId, phase: activeSession.phase, 
+                    note: sessionNote, seconds: finalSec, date: new Date().toISOString(), timestamp: Date.now(), 
                     displayStartTime: new Date(activeSession.sessionStartTimeStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
                     displayEndTime: endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
                 };
@@ -280,7 +300,7 @@
 
             const currentPhaseColor = useMemo(() => PHASES.find(p => p.id === activePhase)?.color || '#3b82f6', [activePhase]);
 
-            if (isLoading && !user) return <div className="flex items-center justify-center h-screen text-slate-500 font-mono animate-pulse text-xs tracking-widest uppercase">Connecting to Cloud...</div>;
+            if (isLoading && !user) return <div className="flex items-center justify-center h-screen text-slate-500 font-mono animate-pulse text-xs tracking-widest uppercase">Connecting...</div>;
 
             return (
                 <div className="max-w-md mx-auto px-4 py-6 space-y-6 pb-24">
@@ -291,8 +311,8 @@
 
                     {showSyncModal && (
                         <div className="fixed inset-0 z-50 bg-black/95 flex items-center justify-center p-6 backdrop-blur-md">
-                            <div className="mobile-card p-7 w-full max-w-xs space-y-5 shadow-2xl">
-                                <h2 className="text-white font-bold flex items-center gap-2 text-lg"><Icon name="settings" size={20} color="#3b82f6"/> 跨裝置同步</h2>
+                            <div className="mobile-card p-7 w-full max-w-xs space-y-5 shadow-2xl text-center">
+                                <h2 className="text-white font-bold flex items-center justify-center gap-2 text-lg"><Icon name="settings" size={20} color="#3b82f6"/> 跨裝置同步</h2>
                                 <input type="text" placeholder="輸入同步 ID" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none" value={syncKey} onChange={e => setSyncKey(e.target.value)} />
                                 <div className="flex gap-2"><button onClick={() => { localStorage.setItem('yt_editor_sync_id', syncKey); window.location.reload(); }} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-bold">儲存並重啟</button><button onClick={() => setShowSyncModal(false)} className="flex-1 py-4 bg-white/10 text-slate-300 rounded-2xl">關閉</button></div>
                             </div>
@@ -310,18 +330,20 @@
                             <div className="px-3 space-y-3">
                                 {(!activeSession || !activeSession.isRunning) ? <button onClick={startTimer} style={{ backgroundColor: activeProjectId ? currentPhaseColor : '#334155' }} className="w-full py-5 text-white rounded-[24px] font-bold text-lg sm:text-xl shadow-xl flex items-center justify-center gap-3 btn-active"><Icon name="play" fill="currentColor" size={24} /> 開始肝嚕！</button>
                                 : <button onClick={pauseTimer} className="w-full py-5 bg-orange-600/90 text-white rounded-[24px] font-bold text-lg sm:text-xl btn-active flex items-center justify-center gap-3"><Icon name="pause" fill="currentColor" size={24} /> 休息一下</button>}
-                                {displaySeconds > 0 && <button onClick={stopTimer} className="w-full py-2 text-red-500 text-[11px] font-bold uppercase tracking-[0.3em] opacity-80 hover:opacity-100">結束並存檔</button>}
+                                {displaySeconds > 0 && <button onClick={stopTimer} className="w-full py-2 text-red-500 text-[11px] font-bold uppercase tracking-[0.3em] opacity-80 hover:opacity-100 transition-opacity">完成存檔</button>}
                             </div>
                         </div>
                         <div className="flex items-center gap-3 bg-black/30 p-4 rounded-2xl border border-white/5 mx-1 shadow-inner"><Icon name="message-square" size={16} className="text-slate-600" /><input type="text" placeholder="本次筆記 (隨時可打)..." className="bg-transparent text-xs text-slate-300 outline-none w-full placeholder-slate-700" value={sessionNote} onChange={e => setSessionNote(e.target.value)} /></div>
                     </div>
 
+                    {/* Stats Dashboard */}
                     <div className="grid grid-cols-3 gap-2">
                         <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold uppercase mb-1">本日肝片</span><span className="text-lg font-bold text-orange-400 font-mono tracking-tighter">{todayHours}h</span></div>
                         <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold uppercase mb-1">平均時薪</span><span className="text-lg font-bold text-green-400 font-mono tracking-tighter">${stats.length > 0 ? Math.round(stats.reduce((a, b) => a + b.actualHourlyRate, 0) / stats.length) : 0}</span></div>
-                        <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold uppercase mb-1">預估總淨利</span><span className="text-lg font-bold text-blue-400 font-mono tracking-tighter">${stats.reduce((a, b) => a + b.netIncome, 0).toLocaleString()}</span></div>
+                        <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold uppercase mb-1">總淨利</span><span className="text-lg font-bold text-blue-400 font-mono tracking-tighter">${stats.reduce((a, b) => a + b.netIncome, 0).toLocaleString()}</span></div>
                     </div>
 
+                    {/* Projects Section */}
                     <div className="space-y-4">
                         <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2"><Icon name="target" size={14} color="#ec4899" /> 專案成效分析</h2>
                         {stats.map(p => (
@@ -366,13 +388,20 @@
                                     <div className="grid grid-cols-2 gap-2 mt-4">{p.phaseData.filter(ph => ph.percent > 0).map(ph => (<div key={ph.id} className="bg-black/20 p-2.5 rounded-xl flex items-center justify-between border border-white/5"><div className="flex items-center gap-2 overflow-hidden"><div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: ph.color }} /><span className="text-[10px] text-slate-400 truncate">{ph.name}</span></div><span className="text-[10px] font-mono font-bold" style={{ color: ph.color }}>{ph.percent.toFixed(0)}%</span></div>))}</div>
                                 </div>
                                 <div className="flex justify-between items-center pt-4 border-t border-white/5">
-                                    <div className="flex-1">{p.deadline && (<span className={`text-[10px] font-bold px-3 py-1.5 rounded-xl flex items-center gap-2 ${p.daysLeft < 3 ? 'bg-red-500/20 text-red-400 animate-pulse' : 'bg-white/5 text-slate-400'}`}><Icon name="calendar" size={12} /> {p.deadline.substring(5)} ({p.daysLeft}天)</span>)}</div>
+                                    <div className="flex-1">
+                                        {p.deadline ? (
+                                            <span className={`text-[10px] font-bold px-3 py-1.5 rounded-xl flex items-center gap-2 ${p.daysLeft < 3 ? 'bg-red-500/20 text-red-400 animate-pulse' : 'bg-white/5 text-slate-400'}`}>
+                                                <Icon name="calendar" size={12} /> {p.deadline.substring(5)} ({p.daysLeft}天)
+                                            </span>
+                                        ) : null}
+                                    </div>
                                     <button onClick={async () => { if(confirm("徹底刪除專案與數據？")) { const storageUid = syncKey ? `shared_${syncKey}` : user.uid; await db.collection(`artifacts/${appId}/users/${storageUid}/projects`).doc(p.id).delete(); } }} className="p-2.5 text-slate-700 hover:text-red-500 rounded-xl btn-active"><Icon name="trash-2" size={18}/></button>
                                 </div>
                             </div>
                         ))}
                     </div>
 
+                    {/* New Project Form */}
                     <div className="mobile-card p-7 space-y-6 shadow-2xl border-white/5">
                         <h3 className="text-lg font-bold text-white flex items-center gap-3"><Icon name="plus" size={20} color="#3b82f6"/> 新增剪輯計畫</h3>
                         <div className="space-y-5">
@@ -387,7 +416,7 @@
                             <button onClick={addProject} className="w-full py-5 rounded-[24px] font-bold text-lg shadow-xl btn-active mt-2 bg-blue-600 text-white transition-all">建立計畫</button>
                         </div>
                     </div>
-                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v5.6 • Persistence Engine Ready</footer>
+                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v5.7 • Cloud Auto-Save Enabled</footer>
                 </div>
             );
         }
