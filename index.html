@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>YT Editor Workflow Pro - UI Optimized</title>
+    <title>YT Editor Workflow Pro - stable</title>
     <!-- 1. 核心樣式與框架 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -32,7 +32,6 @@
         .btn-active:active { transform: scale(0.96); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
         
-        /* 特別針對計時器數字微調 */
         .timer-font {
             font-family: 'JetBrains Mono', monospace;
             letter-spacing: -0.02em;
@@ -43,14 +42,14 @@
     <div id="root">
         <div class="flex flex-col items-center justify-center h-screen space-y-4 text-slate-500 text-center px-10">
             <div class="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse">介面優化裝載中...</div>
+            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse">系統優化裝載中...</div>
         </div>
     </div>
 
     <script type="text/babel">
         const { useState, useEffect, useMemo } = React;
 
-        // --- 內嵌 SVG 圖標 ---
+        // --- 內嵌 SVG 圖標組件 ---
         const Icon = ({ name, size = 20, className = "", color = "currentColor", fill = "none" }) => {
             const icons = {
                 "trending-up": <path d="m22 7-8.5 8.5-5-5L2 17M22 7h-6M22 7v6"/>,
@@ -116,9 +115,11 @@
             const [sessionNote, setSessionNote] = useState('');
             const [sessionStartTime, setSessionStartTime] = useState(null);
 
-            // 修改金額相關的 State
+            // 修改數據相關的 State
             const [editingIncomeId, setEditingIncomeId] = useState(null);
             const [tempIncome, setTempIncome] = useState('');
+            const [editingHoursId, setEditingHoursId] = useState(null);
+            const [tempHours, setTempHours] = useState('');
 
             const initialNewProject = { 
                 name: '', client: '', estHours: '', estIncome: '', cost: '', 
@@ -178,11 +179,11 @@
                     await db.collection(`artifacts/${appId}/users/${storageUid}/projects`).add(projectToSave);
                     setNewProject(initialNewProject);
                     alert("建立成功！");
-                } catch (err) { alert("建立失敗: " + err.code); } 
-                finally { setIsAdding(false); }
+                } catch (err) {
+                    alert("建立失敗: " + err.code);
+                } finally { setIsAdding(false); }
             };
 
-            // 儲存修改後的金額
             const saveNewIncome = async (projectId) => {
                 try {
                     const storageUid = syncKey ? `shared_${syncKey}` : user.uid;
@@ -193,13 +194,24 @@
                 } catch (err) { alert("修改失敗: " + err.message); }
             };
 
+            const saveNewHours = async (projectId) => {
+                try {
+                    const storageUid = syncKey ? `shared_${syncKey}` : user.uid;
+                    await db.collection(`artifacts/${appId}/users/${storageUid}/projects`).doc(projectId).update({
+                        estHours: parseFloat(tempHours) || 0
+                    });
+                    setEditingHoursId(null);
+                } catch (err) { alert("修改失敗: " + err.message); }
+            };
+
             const stats = useMemo(() => {
                 if (!projects.length) return [];
                 return projects.map(p => {
                     const pLogs = logs.filter(l => l.projectId === p.id), actualSec = pLogs.reduce((acc, curr) => acc + curr.seconds, 0), actualHours = actualSec / 3600;
                     const net = (p.estIncome || 0) - (p.cost || 0), rate = Math.min(actualHours > 0 ? net / actualHours : 0, p.estIncome || 0);
+                    const efficiency = (actualHours / (p.estHours || 1)) * 100;
                     const phaseData = PHASES.map(ph => { const phSec = pLogs.filter(l => l.phase === ph.id).reduce((a, c) => a + c.seconds, 0); return { ...ph, percent: actualSec > 0 ? (phSec / actualSec) * 100 : 0 }; });
-                    return { ...p, actualHours, actualHourlyRate: rate, efficiency: (actualHours / (p.estHours || 1)) * 100, phaseData, daysLeft: p.deadline ? Math.ceil((new Date(p.deadline) - new Date()) / 86400000) : null, netIncome: net, recentWork: [...pLogs].sort((a,b) => b.timestamp - a.timestamp).slice(0, 5) };
+                    return { ...p, actualHours, actualHourlyRate: rate, efficiency, phaseData, daysLeft: p.deadline ? Math.ceil((new Date(p.deadline) - new Date()) / 86400000) : null, netIncome: net, recentWork: [...pLogs].sort((a,b) => b.timestamp - a.timestamp).slice(0, 5) };
                 }).sort((a, b) => new Date(b.projectDate) - new Date(a.projectDate));
             }, [logs, projects]);
 
@@ -235,30 +247,22 @@
                     {/* Timer Section */}
                     <div className="mobile-card p-4 sm:p-6 space-y-6 shadow-2xl border-white/5 border-2">
                         <div className="space-y-4">
-                            <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase">執行專案</label><select className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white outline-none focus:ring-2 ring-blue-500 appearance-none" value={activeProjectId} onChange={e => setActiveProjectId(e.target.value)} disabled={isRunning}><option value="">-- 點選專案 --</option>{projects.map(p => <option key={p.id} value={p.id}>{p.client} | {p.name}</option>)}</select></div>
-                            <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase">工作環節</label><div className="grid grid-cols-2 gap-2">{PHASES.map(ph => <button key={ph.id} onClick={() => setActivePhase(ph.id)} disabled={isRunning} style={activePhase === ph.id ? { borderColor: ph.color, backgroundColor: `${ph.color}20`, color: ph.color } : {}} className={`text-[11px] py-3.5 rounded-2xl border border-white/5 bg-white/5 text-slate-500 btn-active ${activePhase === ph.id ? 'font-bold' : ''}`}>{ph.name}</button>)}</div></div>
+                            <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">執行專案</label><select className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white outline-none focus:ring-2 ring-blue-500 appearance-none" value={activeProjectId} onChange={e => setActiveProjectId(e.target.value)} disabled={isRunning}><option value="">-- 點選專案 --</option>{projects.map(p => <option key={p.id} value={p.id}>{p.client} | {p.name}</option>)}</select></div>
+                            <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">工作環節</label><div className="grid grid-cols-2 gap-2">{PHASES.map(ph => <button key={ph.id} onClick={() => setActivePhase(ph.id)} disabled={isRunning} style={activePhase === ph.id ? { borderColor: ph.color, backgroundColor: `${ph.color}20`, color: ph.color } : {}} className={`text-[11px] py-3.5 rounded-2xl border border-white/5 bg-white/5 text-slate-500 btn-active ${activePhase === ph.id ? 'font-bold' : ''}`}>{ph.name}</button>)}</div></div>
                         </div>
                         
                         <div className="text-center space-y-5 py-8 px-2 sm:px-6 bg-black/40 rounded-[36px] border border-white/5 shadow-inner">
                             <div 
-                                className={`timer-font text-5xl sm:text-6xl font-bold timer-glow transition-all duration-500 ${isRunning ? 'scale-105' : 'opacity-20'}`}
+                                className={`timer-font text-5xl sm:text-6xl font-bold timer-glow transition-all duration-500 ${isRunning ? 'scale-105' : 'opacity-20'}`} 
                                 style={{ color: isRunning ? currentPhaseColor : '#e2e8f0' }}
                             >
                                 {formatTime(time)}
                             </div>
                             <div className="px-3 sm:px-5 space-y-3">
                                 {!isRunning ? (
-                                    <button 
-                                        onClick={startTimer} 
-                                        style={{ backgroundColor: activeProjectId ? currentPhaseColor : '#334155' }} 
-                                        className="w-full py-5 text-white rounded-[24px] font-bold text-lg sm:text-xl shadow-xl flex items-center justify-center gap-3 btn-active"
-                                    >
-                                        <Icon name="play" fill="currentColor" size={24} /> 開始肝嚕！
-                                    </button>
+                                    <button onClick={startTimer} style={{ backgroundColor: activeProjectId ? currentPhaseColor : '#334155' }} className="w-full py-5 text-white rounded-[24px] font-bold text-lg sm:text-xl shadow-xl flex items-center justify-center gap-3 btn-active"><Icon name="play" fill="currentColor" size={24} /> 開始肝嚕！</button>
                                 ) : (
-                                    <button onClick={() => setIsRunning(false)} className="w-full py-5 bg-orange-600/90 text-white rounded-[24px] font-bold text-lg sm:text-xl btn-active flex items-center justify-center gap-3">
-                                        <Icon name="pause" fill="currentColor" size={24} /> 休息一下
-                                    </button>
+                                    <button onClick={() => setIsRunning(false)} className="w-full py-5 bg-orange-600/90 text-white rounded-[24px] font-bold text-lg sm:text-xl btn-active flex items-center justify-center gap-3"><Icon name="pause" fill="currentColor" size={24} /> 休息一下</button>
                                 )}
                                 {time > 0 && <button onClick={stopTimer} className="w-full py-2 text-red-500 text-[11px] font-bold uppercase tracking-[0.3em]">結束並存檔</button>}
                             </div>
@@ -266,7 +270,7 @@
                         
                         <div className="flex items-center gap-3 bg-black/30 p-4 rounded-2xl border border-white/5 shadow-inner mx-1">
                             <Icon name="message-square" size={16} className="text-slate-600" />
-                            <input type="text" placeholder="本次筆記..." className="bg-transparent text-xs text-slate-300 outline-none w-full" value={sessionNote} onChange={e => setSessionNote(e.target.value)} />
+                            <input type="text" placeholder="本次筆記..." className="bg-transparent text-xs text-slate-300 outline-none w-full placeholder-slate-700" value={sessionNote} onChange={e => setSessionNote(e.target.value)} />
                         </div>
                     </div>
 
@@ -289,20 +293,10 @@
                                     </div>
                                     <div className="text-right flex flex-col items-end">
                                         <div className="text-xl font-bold text-green-400 font-mono tracking-tighter">${Math.round(p.actualHourlyRate)}/h</div>
-                                        
-                                        {/* 可編輯的淨利區塊 */}
                                         <div className="flex items-center gap-1 group">
                                             {editingIncomeId === p.id ? (
                                                 <div className="flex items-center gap-1 bg-black/50 p-1 rounded-lg border border-blue-500/50 mt-1">
-                                                    <input 
-                                                        type="number" 
-                                                        autoFocus
-                                                        className="w-16 bg-transparent text-[10px] text-white outline-none font-bold"
-                                                        value={tempIncome}
-                                                        onChange={e => setTempIncome(e.target.value)}
-                                                        onBlur={() => saveNewIncome(p.id)}
-                                                        onKeyDown={e => e.key === 'Enter' && saveNewIncome(p.id)}
-                                                    />
+                                                    <input type="number" autoFocus className="w-16 bg-transparent text-[10px] text-white outline-none font-bold" value={tempIncome} onChange={e => setTempIncome(e.target.value)} onBlur={() => saveNewIncome(p.id)} onKeyDown={e => e.key === 'Enter' && saveNewIncome(p.id)} />
                                                     <button onClick={() => saveNewIncome(p.id)} className="text-green-500"><Icon name="check" size={12}/></button>
                                                 </div>
                                             ) : (
@@ -328,7 +322,7 @@
                                                     </div>
                                                     <div className="flex items-center gap-3">
                                                         <span className="text-white font-bold">{Math.round(l.seconds / 60)}m</span>
-                                                        <button onClick={() => {if(confirm("刪除這筆紀錄？")){ const storageUid = syncKey ? `shared_${syncKey}` : user.uid; db.collection(`artifacts/${appId}/users/${storageUid}/logs`).doc(l.id).delete(); }}} className="p-1.5 bg-red-500/10 text-red-500 rounded-lg"><Icon name="x" size={10} /></button>
+                                                        <button onClick={() => {if(confirm("刪除紀錄？")){ const storageUid = syncKey ? `shared_${syncKey}` : user.uid; db.collection(`artifacts/${appId}/users/${storageUid}/logs`).doc(l.id).delete(); }}} className="p-1.5 bg-red-500/10 text-red-500 rounded-lg"><Icon name="x" size={10} /></button>
                                                     </div>
                                                 </div>
                                             );
@@ -336,18 +330,43 @@
                                     </div>
                                 )}
                                 <div className="space-y-4">
-                                    <div className="space-y-2"><div className="flex justify-between text-[10px] font-bold uppercase"><span className="text-slate-500">時數進度 ({p.actualHours.toFixed(1)} / {p.estHours}h)</span><span className={p.efficiency > 100 ? 'text-red-400' : 'text-blue-400'}>{p.efficiency.toFixed(0)}%</span></div><div className="h-2 bg-black rounded-full overflow-hidden border border-white/5 shadow-inner"><div className={`h-full transition-all duration-1000 ${p.efficiency > 100 ? 'bg-red-500' : 'bg-blue-600'}`} style={{ width: `${Math.min(p.efficiency, 100)}%` }} /></div></div>
+                                    <div className="space-y-2">
+                                        <div className="flex justify-between text-[10px] font-bold uppercase">
+                                            <span className="text-slate-500 flex items-center gap-1">
+                                                投入: {p.actualHours.toFixed(1)}h / 
+                                                {editingHoursId === p.id ? (
+                                                    <span className="inline-flex items-center gap-1 bg-black/50 px-1 rounded border border-blue-500/50">
+                                                        <input type="number" autoFocus className="w-10 bg-transparent text-white outline-none" value={tempHours} onChange={e => setTempHours(e.target.value)} onBlur={() => saveNewHours(p.id)} onKeyDown={e => e.key === 'Enter' && saveNewHours(p.id)} />
+                                                        <button onClick={() => saveNewHours(p.id)} className="text-green-500"><Icon name="check" size={10}/></button>
+                                                    </span>
+                                                ) : (
+                                                    <span className="cursor-pointer hover:text-blue-400 inline-flex items-center gap-1" onClick={() => { setEditingHoursId(p.id); setTempHours(p.estHours); }}>
+                                                        預計: {p.estHours}h <Icon name="edit" size={8} className="text-slate-700"/>
+                                                    </span>
+                                                )}
+                                            </span>
+                                            <span className={p.efficiency > 100 ? 'text-red-400' : 'text-blue-400'}>{p.efficiency.toFixed(0)}%</span>
+                                        </div>
+                                        <div className="h-2 bg-black rounded-full overflow-hidden border border-white/5 shadow-inner"><div className={`h-full transition-all duration-1000 ${p.efficiency > 100 ? 'bg-red-500' : 'bg-blue-600'}`} style={{ width: `${Math.min(p.efficiency, 100)}%` }} /></div>
+                                    </div>
                                     <div className="grid grid-cols-2 gap-2 mt-4">
                                         {p.phaseData.filter(ph => ph.percent > 0).map(ph => (<div key={ph.id} className="bg-black/20 p-2.5 rounded-xl flex items-center justify-between border border-white/5"><div className="flex items-center gap-2 overflow-hidden"><div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: ph.color }} /><span className="text-[10px] text-slate-400 truncate">{ph.name}</span></div><span className="text-[10px] font-mono font-bold" style={{ color: ph.color }}>{ph.percent.toFixed(0)}%</span></div>))}
                                     </div>
                                 </div>
                                 <div className="flex justify-between items-center pt-4 border-t border-white/5">
-                                    {p.deadline ? (
-                                        <span className={`text-[10px] font-bold px-3 py-1.5 rounded-xl flex items-center gap-2 ${p.daysLeft < 3 ? 'bg-red-500/20 text-red-400 animate-pulse' : 'bg-white/5 text-slate-400'}`}>
-                                            <Icon name="calendar" size={12} /> {p.deadline.substring(5)} ({p.daysLeft}天)
-                                        </span>
-                                    ) : <div />}
-                                    <button onClick={async () => { if(confirm("徹底刪除專案與數據？")) { const storageUid = syncKey ? `shared_${syncKey}` : user.uid; await db.collection(`artifacts/${appId}/users/${storageUid}/projects`).doc(p.id).delete(); } }} className="p-2.5 text-slate-700 hover:text-red-500 rounded-xl btn-active"><Icon name="trash-2" size={18}/></button>
+                                    <div className="flex-1">
+                                        {p.deadline ? (
+                                            <span className={`text-[10px] font-bold px-3 py-1.5 rounded-xl flex items-center gap-2 ${p.daysLeft < 3 ? 'bg-red-500/20 text-red-400 animate-pulse' : 'bg-white/5 text-slate-400'}`}>
+                                                <Icon name="calendar" size={12} /> {p.deadline.substring(5)} ({p.daysLeft}天)
+                                            </span>
+                                        ) : null}
+                                    </div>
+                                    <button 
+                                        onClick={async () => { if(confirm("徹底刪除專案與數據？")) { const storageUid = syncKey ? `shared_${syncKey}` : user.uid; await db.collection(`artifacts/${appId}/users/${storageUid}/projects`).doc(p.id).delete(); } }} 
+                                        className="p-2.5 text-slate-700 hover:text-red-500 rounded-xl btn-active"
+                                    >
+                                        <Icon name="trash-2" size={18}/>
+                                    </button>
                                 </div>
                             </div>
                         ))}
@@ -358,47 +377,16 @@
                         <div className="space-y-5">
                             <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase px-1 tracking-widest">影片標題 (必填)</label><input type="text" placeholder="影片名稱" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none focus:border-blue-500 shadow-inner" value={newProject.name} onChange={e => setNewProject({...newProject, name: e.target.value})} /></div>
                             <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase px-1 tracking-widest">客戶名稱 (必填)</label><input type="text" placeholder="客戶名" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none focus:border-blue-500 shadow-inner" value={newProject.client} onChange={e => setNewProject({...newProject, client: e.target.value})} /></div>
-                            
                             <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1.5">
-                                    <label className="text-[10px] text-slate-500 font-bold uppercase px-1">預估收益</label>
-                                    <input 
-                                        type="number" 
-                                        placeholder="NTD"
-                                        className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" 
-                                        value={newProject.estIncome} 
-                                        onChange={e => setNewProject({...newProject, estIncome: e.target.value})} 
-                                    />
-                                </div>
-                                <div className="space-y-1.5">
-                                    <label className="text-[10px] text-slate-500 font-bold uppercase px-1">額外成本</label>
-                                    <input 
-                                        type="number" 
-                                        placeholder="NTD"
-                                        className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" 
-                                        value={newProject.cost} 
-                                        onChange={e => setNewProject({...newProject, cost: e.target.value})} 
-                                    />
-                                </div>
+                                <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase px-1">預估收益</label><input type="number" placeholder="NTD" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" value={newProject.estIncome} onChange={e => setNewProject({...newProject, estIncome: e.target.value})} /></div>
+                                <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase px-1">額外成本</label><input type="number" placeholder="NTD" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" value={newProject.cost} onChange={e => setNewProject({...newProject, cost: e.target.value})} /></div>
                             </div>
-                            
                             <div className="grid grid-cols-2 gap-4"><div className="space-y-1.5"><label className="text-[10px] text-blue-400 font-bold uppercase px-1">執行日期</label><input type="date" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white" value={newProject.projectDate} onChange={e => setNewProject({...newProject, projectDate: e.target.value})} /></div><div className="space-y-1.5"><label className="text-[10px] text-red-400 font-bold uppercase px-1">截稿日期</label><input type="date" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white" value={newProject.deadline} onChange={e => setNewProject({...newProject, deadline: e.target.value})} /></div></div>
-                            
-                            <div className="space-y-1.5">
-                                <label className="text-[10px] text-slate-500 font-bold uppercase px-1">預計總時數 (h)</label>
-                                <input 
-                                    type="number" 
-                                    placeholder="小時"
-                                    className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" 
-                                    value={newProject.estHours} 
-                                    onChange={e => setNewProject({...newProject, estHours: e.target.value})} 
-                                />
-                            </div>
-                            
+                            <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase px-1">預計總時數 (h)</label><input type="number" placeholder="小時" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" value={newProject.estHours} onChange={e => setNewProject({...newProject, estHours: e.target.value})} /></div>
                             <button onClick={addProject} disabled={isAdding} className={`w-full py-5 rounded-[24px] font-bold text-lg shadow-xl btn-active mt-2 transition-all ${isAdding ? 'bg-slate-700 text-slate-400' : 'bg-blue-600 text-white'}`}>{isAdding ? '建立中...' : '建立計畫'}</button>
                         </div>
                     </div>
-                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v4.6 • Dynamic Pricing</footer>
+                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v4.8 • UI Optimized</footer>
                 </div>
             );
         }
