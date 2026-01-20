@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>YT Editor Workflow Pro - stable</title>
+    <title>YT Editor Workflow Pro - Persistence</title>
     <!-- 1. 核心樣式與框架 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -31,25 +31,21 @@
         .mobile-card { background-color: #161616; border: 1px solid rgba(255,255,255,0.08); border-radius: 28px; }
         .btn-active:active { transform: scale(0.96); }
         .no-scrollbar::-webkit-scrollbar { display: none; }
-        
-        .timer-font {
-            font-family: 'JetBrains Mono', monospace;
-            letter-spacing: -0.02em;
-        }
+        .timer-font { font-family: 'JetBrains Mono', monospace; letter-spacing: -0.02em; }
     </style>
 </head>
 <body>
     <div id="root">
         <div class="flex flex-col items-center justify-center h-screen space-y-4 text-slate-500 text-center px-10">
             <div class="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse">系統優化裝載中...</div>
+            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse">正在從雲端恢復計時進度...</div>
         </div>
     </div>
 
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
 
-        // --- 全域工具函數：修正 ReferenceError 提升問題 ---
+        // --- 全域工具：時間格式化 ---
         const formatTime = (seconds) => {
             const h = Math.floor(seconds / 3600);
             const m = Math.floor((seconds % 3600) / 60);
@@ -57,7 +53,7 @@
             return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
         };
 
-        // --- 100% 穩定內嵌 SVG 圖標組件 ---
+        // --- 穩定內嵌 SVG 圖標組件 ---
         const Icon = ({ name, size = 20, className = "", color = "currentColor", fill = "none" }) => {
             const icons = {
                 "trending-up": <path d="m22 7-8.5 8.5-5-5L2 17M22 7h-6M22 7v6"/>,
@@ -117,18 +113,14 @@
             const [logs, setLogs] = useState([]);
             const [now, setNow] = useState(new Date());
 
-            // --- 精準計時引擎 ---
-            const [isRunning, setIsRunning] = useState(false);
-            const [baseTime, setBaseTime] = useState(0); 
-            const [startTime, setStartTime] = useState(null); 
+            // --- 精準雲端計時核心變數 ---
             const [displaySeconds, setDisplaySeconds] = useState(0); 
-            
+            const [activeSession, setActiveSession] = useState(null); // 從雲端讀取的狀態
+
             const [activeProjectId, setActiveProjectId] = useState('');
             const [activePhase, setActivePhase] = useState(PHASES[0].id);
             const [sessionNote, setSessionNote] = useState('');
-            const [sessionStartTimeStr, setSessionStartTimeStr] = useState(null);
 
-            // 修改數據用的臨時狀態
             const [editingIncomeId, setEditingIncomeId] = useState(null);
             const [tempIncome, setTempIncome] = useState('');
             const [editingHoursId, setEditingHoursId] = useState(null);
@@ -146,54 +138,95 @@
                     if (u) { setUser(u); setIsLoading(false); } 
                     else { auth.signInAnonymously().catch(() => setIsLoading(false)); }
                 });
-                const clockInterval = setInterval(() => setNow(new Date()), 1000);
-                return () => { unsubscribe(); clearInterval(clockInterval); };
+                const clock = setInterval(() => setNow(new Date()), 1000);
+                return () => { unsubscribe(); clearInterval(clock); };
             }, []);
 
             useEffect(() => {
                 if (!user) return;
                 const storageUid = syncKey ? `shared_${syncKey}` : user.uid;
                 const userPath = `artifacts/${appId}/users/${storageUid}`;
+                
                 const unsubP = db.collection(`${userPath}/projects`).onSnapshot(snap => setProjects(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
                 const unsubL = db.collection(`${userPath}/logs`).onSnapshot(snap => setLogs(snap.docs.map(d => ({ id: d.id, ...d.data() }))));
-                return () => { unsubP(); unsubL(); };
+                
+                // 核心：監聽雲端目前的計時狀態 (activeSession)
+                const unsubS = db.collection(`${userPath}/activeSession`).doc('current').onSnapshot(doc => {
+                    if (doc.exists) {
+                        const data = doc.data();
+                        setActiveSession(data);
+                        setActiveProjectId(data.projectId);
+                        setActivePhase(data.phase);
+                        setSessionNote(data.note || '');
+                    } else {
+                        setActiveSession(null);
+                    }
+                });
+
+                return () => { unsubP(); unsubL(); unsubS(); };
             }, [user, syncKey]);
 
-            // 精準計時核心 (解決手機進入背景問題)
+            // 每秒更新一次畫面顯示的時間 (不論是否在背景，重開即校正)
             useEffect(() => {
-                let interval;
-                if (isRunning && startTime) {
-                    const update = () => setDisplaySeconds(baseTime + Math.floor((Date.now() - startTime) / 1000));
-                    update(); interval = setInterval(update, 1000);
-                    if ('wakeLock' in navigator) navigator.wakeLock.request('screen').then(l => wakeLock.current = l).catch(()=>{});
-                } else {
-                    clearInterval(interval);
-                    if (wakeLock.current) { wakeLock.current.release().then(() => wakeLock.current = null); }
-                }
-                return () => clearInterval(interval);
-            }, [isRunning, startTime, baseTime]);
+                const itv = setInterval(() => {
+                    if (activeSession && activeSession.isRunning) {
+                        const elapsed = Math.floor((Date.now() - activeSession.startTime) / 1000);
+                        setDisplaySeconds(activeSession.baseTime + elapsed);
+                    } else {
+                        setDisplaySeconds(activeSession?.baseTime || 0);
+                    }
+                }, 1000);
+                return () => clearInterval(itv);
+            }, [activeSession]);
 
-            const startTimer = () => { 
+            const startTimer = async () => { 
                 if (!activeProjectId) { alert("請先選擇專案！"); return; } 
-                setIsRunning(true); setStartTime(Date.now());
-                if (!sessionStartTimeStr) setSessionStartTimeStr(new Date()); 
+                const storageUid = syncKey ? `shared_${syncKey}` : user.uid;
+                const sessionData = {
+                    projectId: activeProjectId,
+                    phase: activePhase,
+                    isRunning: true,
+                    startTime: Date.now(),
+                    baseTime: displaySeconds, // 從當前秒數繼續
+                    note: sessionNote,
+                    sessionStartTimeStr: activeSession?.sessionStartTimeStr || new Date().toISOString()
+                };
+                await db.collection(`artifacts/${appId}/users/${storageUid}/activeSession`).doc('current').set(sessionData);
             };
 
-            const pauseTimer = () => {
-                setIsRunning(false);
-                setBaseTime(prev => prev + Math.floor((Date.now() - startTime) / 1000));
-                setStartTime(null);
+            const pauseTimer = async () => {
+                if (!activeSession) return;
+                const storageUid = syncKey ? `shared_${syncKey}` : user.uid;
+                const elapsed = Math.floor((Date.now() - activeSession.startTime) / 1000);
+                await db.collection(`artifacts/${appId}/users/${storageUid}/activeSession`).doc('current').update({
+                    isRunning: false,
+                    baseTime: activeSession.baseTime + elapsed
+                });
             };
 
             const stopTimer = async () => {
-                if (displaySeconds === 0) return;
-                const finalSec = isRunning ? baseTime + Math.floor((Date.now() - startTime) / 1000) : displaySeconds;
-                setIsRunning(false); const endTime = new Date();
-                const logData = { projectId: activeProjectId, phase: activePhase, note: sessionNote, seconds: finalSec, date: new Date().toISOString(), timestamp: Date.now(), displayStartTime: sessionStartTimeStr.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), displayEndTime: endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) };
+                if (displaySeconds === 0 || !activeSession) return;
+                const storageUid = syncKey ? `shared_${syncKey}` : user.uid;
+                const finalSec = activeSession.isRunning ? 
+                    activeSession.baseTime + Math.floor((Date.now() - activeSession.startTime) / 1000) : 
+                    activeSession.baseTime;
+                
+                const endTime = new Date();
+                const logData = { 
+                    projectId: activeSession.projectId, 
+                    phase: activeSession.phase, 
+                    note: sessionNote, 
+                    seconds: finalSec, 
+                    date: new Date().toISOString(), 
+                    timestamp: Date.now(), 
+                    displayStartTime: new Date(activeSession.sessionStartTimeStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
+                    displayEndTime: endTime.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                };
+                
                 try { 
-                    const storageUid = syncKey ? `shared_${syncKey}` : user.uid;
-                    await db.collection(`artifacts/${appId}/users/${storageUid}/logs`).add(logData);
-                    setBaseTime(0); setStartTime(null); setDisplaySeconds(0); setSessionNote(''); setSessionStartTimeStr(null);
+                    await db.collection(`artifacts/${appId}/users/${storageUid}/logs`).add(logData); 
+                    await db.collection(`artifacts/${appId}/users/${storageUid}/activeSession`).doc('current').delete();
+                    setDisplaySeconds(0); setSessionNote('');
                 } catch (err) { alert("存檔失敗: " + err.message); }
             };
 
@@ -232,11 +265,7 @@
                 return projects.map(p => {
                     const pLogs = logs.filter(l => l.projectId === p.id), actualSec = pLogs.reduce((a, c) => a + c.seconds, 0), actualHours = actualSec / 3600;
                     const net = (p.estIncome || 0) - (p.cost || 0);
-                    
-                    // --- 金額封頂規則：實際時薪最高不超過預估收入，避免初期天文數字 ---
-                    const rawRate = actualHours > 0 ? net / actualHours : 0;
-                    const rate = Math.min(rawRate, p.estIncome || 0);
-                    
+                    const rate = Math.min(actualHours > 0 ? net / actualHours : 0, p.estIncome || 0);
                     const efficiency = (actualHours / (p.estHours || 1)) * 100;
                     const phaseData = PHASES.map(ph => { const phSec = pLogs.filter(l => l.phase === ph.id).reduce((a, c) => a + c.seconds, 0); return { ...ph, percent: actualSec > 0 ? (phSec / actualSec) * 100 : 0 }; });
                     return { ...p, actualHours, actualHourlyRate: rate, efficiency, phaseData, daysLeft: p.deadline ? Math.ceil((new Date(p.deadline) - new Date()) / 86400000) : null, netIncome: net, recentWork: [...pLogs].sort((a,b) => b.timestamp - a.timestamp).slice(0, 5) };
@@ -250,7 +279,7 @@
 
             const currentPhaseColor = useMemo(() => PHASES.find(p => p.id === activePhase)?.color || '#3b82f6', [activePhase]);
 
-            if (isLoading && !user) return <div className="flex items-center justify-center h-screen text-slate-500 font-mono animate-pulse text-xs tracking-widest">CONNECTING TO CLOUD...</div>;
+            if (isLoading && !user) return <div className="flex items-center justify-center h-screen text-slate-500 font-mono animate-pulse text-xs tracking-widest uppercase">Connecting to Master Cloud...</div>;
 
             return (
                 <div className="max-w-md mx-auto px-4 py-6 space-y-6 pb-24">
@@ -272,34 +301,24 @@
                     {/* Timer Module */}
                     <div className="mobile-card p-4 sm:p-6 space-y-6 shadow-2xl border-white/5 border-2">
                         <div className="space-y-4">
-                            <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">執行專案</label><select className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white outline-none focus:ring-2 ring-blue-500 appearance-none shadow-inner" value={activeProjectId} onChange={e => setActiveProjectId(e.target.value)} disabled={isRunning}><option value="">-- 點選專案 --</option>{projects.map(p => <option key={p.id} value={p.id}>{p.client} | {p.name}</option>)}</select></div>
-                            <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">工作環節</label><div className="grid grid-cols-2 gap-2">{PHASES.map(ph => <button key={ph.id} onClick={() => setActivePhase(ph.id)} disabled={isRunning} style={activePhase === ph.id ? { borderColor: ph.color, backgroundColor: `${ph.color}20`, color: ph.color } : {}} className={`text-[11px] py-3.5 rounded-2xl border border-white/5 bg-white/5 text-slate-500 btn-active ${activePhase === ph.id ? 'font-bold' : ''}`}>{ph.name}</button>)}</div></div>
+                            <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">執行專案</label><select className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white outline-none focus:ring-2 ring-blue-500 appearance-none shadow-inner" value={activeProjectId} onChange={e => setActiveProjectId(e.target.value)} disabled={activeSession?.isRunning}><option value="">-- 點選專案 --</option>{projects.map(p => <option key={p.id} value={p.id}>{p.client} | {p.name}</option>)}</select></div>
+                            <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">工作環節</label><div className="grid grid-cols-2 gap-2">{PHASES.map(ph => <button key={ph.id} onClick={() => setActivePhase(ph.id)} disabled={activeSession?.isRunning} style={activePhase === ph.id ? { borderColor: ph.color, backgroundColor: `${ph.color}20`, color: ph.color } : {}} className={`text-[11px] py-3.5 rounded-2xl border border-white/5 bg-white/5 text-slate-500 btn-active ${activePhase === ph.id ? 'font-bold' : ''}`}>{ph.name}</button>)}</div></div>
                         </div>
                         <div className="text-center space-y-5 py-8 px-2 bg-black/40 rounded-[36px] border border-white/5 shadow-inner">
-                            <div className={`timer-font text-5xl sm:text-6xl font-bold timer-glow transition-all duration-300 ${isRunning ? 'scale-105' : 'opacity-20'}`} style={{ color: isRunning ? currentPhaseColor : '#e2e8f0' }}>{formatTime(displaySeconds)}</div>
+                            <div className={`timer-font text-5xl sm:text-6xl font-bold timer-glow transition-all duration-300 ${activeSession?.isRunning ? 'scale-105' : 'opacity-20'}`} style={{ color: activeSession?.isRunning ? currentPhaseColor : '#e2e8f0' }}>{formatTime(displaySeconds)}</div>
                             <div className="px-3 space-y-3">
-                                {!isRunning ? <button onClick={startTimer} style={{ backgroundColor: activeProjectId ? currentPhaseColor : '#334155' }} className="w-full py-5 text-white rounded-[24px] font-bold text-lg sm:text-xl shadow-xl flex items-center justify-center gap-3 btn-active"><Icon name="play" fill="currentColor" size={24} /> 開始肝嚕！</button>
+                                {(!activeSession || !activeSession.isRunning) ? <button onClick={startTimer} style={{ backgroundColor: activeProjectId ? currentPhaseColor : '#334155' }} className="w-full py-5 text-white rounded-[24px] font-bold text-lg sm:text-xl shadow-xl flex items-center justify-center gap-3 btn-active"><Icon name="play" fill="currentColor" size={24} /> 開始肝嚕！</button>
                                 : <button onClick={pauseTimer} className="w-full py-5 bg-orange-600/90 text-white rounded-[24px] font-bold text-lg sm:text-xl btn-active flex items-center justify-center gap-3"><Icon name="pause" fill="currentColor" size={24} /> 休息一下</button>}
                                 {displaySeconds > 0 && <button onClick={stopTimer} className="w-full py-2 text-red-500 text-[11px] font-bold uppercase tracking-[0.3em] opacity-80 hover:opacity-100">結束並存檔</button>}
                             </div>
                         </div>
-                        <div className="flex items-center gap-3 bg-black/30 p-4 rounded-2xl border border-white/5 shadow-inner mx-1"><Icon name="message-square" size={16} className="text-slate-600" /><input type="text" placeholder="本次筆記 (隨時可打)..." className="bg-transparent text-xs text-slate-300 outline-none w-full placeholder-slate-700" value={sessionNote} onChange={e => setSessionNote(e.target.value)} /></div>
+                        <div className="flex items-center gap-3 bg-black/30 p-4 rounded-2xl border border-white/5 mx-1 shadow-inner"><Icon name="message-square" size={16} className="text-slate-600" /><input type="text" placeholder="本次筆記 (隨時可打)..." className="bg-transparent text-xs text-slate-300 outline-none w-full" value={sessionNote} onChange={e => setSessionNote(e.target.value)} /></div>
                     </div>
 
-                    {/* Dashboard Stats */}
                     <div className="grid grid-cols-3 gap-2">
-                        <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg">
-                            <span className="text-[8px] text-slate-500 font-bold uppercase mb-1">本日肝片</span>
-                            <span className="text-lg font-bold text-orange-400 font-mono tracking-tighter">{todayHours}h</span>
-                        </div>
-                        <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg">
-                            <span className="text-[8px] text-slate-500 font-bold uppercase mb-1">平均時薪</span>
-                            <span className="text-lg font-bold text-green-400 font-mono tracking-tighter">${stats.length > 0 ? Math.round(stats.reduce((a, b) => a + b.actualHourlyRate, 0) / stats.length) : 0}</span>
-                        </div>
-                        <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg">
-                            <span className="text-[8px] text-slate-500 font-bold uppercase mb-1">預估總淨利</span>
-                            <span className="text-lg font-bold text-blue-400 font-mono tracking-tighter">${stats.reduce((a, b) => a + b.netIncome, 0).toLocaleString()}</span>
-                        </div>
+                        <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold uppercase mb-1">本日肝片</span><span className="text-lg font-bold text-orange-400 font-mono tracking-tighter">{todayHours}h</span></div>
+                        <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold uppercase mb-1">平均時薪</span><span className="text-lg font-bold text-green-400 font-mono tracking-tighter">${stats.length > 0 ? Math.round(stats.reduce((a, b) => a + b.actualHourlyRate, 0) / stats.length) : 0}</span></div>
+                        <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold uppercase mb-1">預估總淨利</span><span className="text-lg font-bold text-blue-400 font-mono tracking-tighter">${stats.reduce((a, b) => a + b.netIncome, 0).toLocaleString()}</span></div>
                     </div>
 
                     <div className="space-y-4">
@@ -307,23 +326,14 @@
                         {stats.map(p => (
                             <div key={p.id} className="mobile-card p-6 space-y-5 shadow-2xl">
                                 <div className="flex justify-between items-start">
-                                    <div className="space-y-2 max-w-[65%]">
-                                        <div className="flex items-center gap-2"><span className="text-[9px] bg-blue-500/10 text-blue-400 font-bold px-2 py-0.5 rounded-lg border border-blue-500/20">{p.client}</span><span className="text-[9px] text-slate-600 font-mono">{p.projectDate.substring(5).replace('-', '/')}</span></div>
-                                        <h3 className="text-lg font-bold text-white leading-tight">{p.name}</h3>
-                                    </div>
+                                    <div className="space-y-2 max-w-[65%]"><div className="flex items-center gap-2"><span className="text-[9px] bg-blue-500/10 text-blue-400 font-bold px-2 py-0.5 rounded-lg border border-blue-500/20">{p.client}</span><span className="text-[9px] text-slate-600 font-mono">{p.projectDate.substring(5).replace('-', '/')}</span></div><h3 className="text-lg font-bold text-white leading-tight">{p.name}</h3></div>
                                     <div className="text-right flex flex-col items-end">
                                         <div className="text-xl font-bold text-green-400 font-mono tracking-tighter">${Math.round(p.actualHourlyRate)}/h</div>
                                         <div className="flex flex-col items-end gap-0.5 mt-1">
                                             {editingIncomeId === p.id ? (
-                                                <div className="flex items-center gap-1 bg-black/50 p-1 rounded-lg border border-blue-500/50">
-                                                    <input type="number" autoFocus className="w-16 bg-transparent text-[10px] text-white outline-none font-bold" value={tempIncome} onChange={e => setTempIncome(e.target.value)} onBlur={() => saveNewIncome(p.id)} onKeyDown={e => e.key === 'Enter' && saveNewIncome(p.id)} />
-                                                    <button onClick={() => saveNewIncome(p.id)} className="text-green-500"><Icon name="check" size={12}/></button>
-                                                </div>
+                                                <div className="flex items-center gap-1 bg-black/50 p-1 rounded-lg border border-blue-500/50"><input type="number" autoFocus className="w-16 bg-transparent text-[10px] text-white outline-none font-bold" value={tempIncome} onChange={e => setTempIncome(e.target.value)} onBlur={() => saveNewIncome(p.id)} onKeyDown={e => e.key === 'Enter' && saveNewIncome(p.id)} /><button onClick={() => saveNewIncome(p.id)} className="text-green-500"><Icon name="check" size={12}/></button></div>
                                             ) : (
-                                                <div className="flex items-center gap-1 cursor-pointer hover:opacity-80" onClick={() => { setEditingIncomeId(p.id); setTempIncome(p.estIncome); }}>
-                                                    <span className="text-[9px] text-slate-400 font-bold uppercase">預估收入: ${p.estIncome.toLocaleString()}</span>
-                                                    <Icon name="edit" size={10} className="text-slate-700"/>
-                                                </div>
+                                                <div className="flex items-center gap-1 cursor-pointer hover:opacity-80" onClick={() => { setEditingIncomeId(p.id); setTempIncome(p.estIncome); }}><span className="text-[9px] text-slate-400 font-bold uppercase">預估收入: ${p.estIncome.toLocaleString()}</span><Icon name="edit" size={10} className="text-slate-700"/></div>
                                             )}
                                             <span className="text-[9px] text-slate-600 font-bold uppercase tracking-tighter">淨利: ${p.netIncome.toLocaleString()}</span>
                                         </div>
@@ -336,15 +346,8 @@
                                             const ph = PHASES.find(x => x.id === l.phase);
                                             return (
                                                 <div key={l.id} className="flex justify-between items-center text-[11px] font-mono border-b border-white/5 pb-2 last:border-0 last:pb-0">
-                                                    <div className="flex flex-col flex-1 mr-4">
-                                                        <span className="font-bold" style={{ color: ph?.color || '#e2e8f0' }}>[{ph?.name || '未分類'}]</span>
-                                                        <span className="text-slate-500 text-[9px] opacity-70">{l.displayStartTime} - {l.displayEndTime}</span>
-                                                        {l.note && <span className="text-[10px] text-slate-400 opacity-80 mt-0.5 italic block truncate">💬 {l.note}</span>}
-                                                    </div>
-                                                    <div className="flex items-center gap-3">
-                                                        <span className="text-white font-bold">{Math.round(l.seconds / 60)}m</span>
-                                                        <button onClick={() => {if(confirm("刪除紀錄？")){ const storageUid = syncKey ? `shared_${syncKey}` : user.uid; db.collection(`artifacts/${appId}/users/${storageUid}/logs`).doc(l.id).delete(); }}} className="p-1.5 bg-red-500/10 text-red-500 rounded-lg transition-all active:scale-90"><Icon name="x" size={10} /></button>
-                                                    </div>
+                                                    <div className="flex flex-col flex-1 mr-4"><span className="font-bold" style={{ color: ph?.color || '#e2e8f0' }}>[{ph?.name || '未分類'}]</span><span className="text-slate-500 text-[9px] opacity-70">{l.displayStartTime} - {l.displayEndTime}</span>{l.note && <span className="text-[10px] text-slate-400 opacity-80 mt-0.5 italic block truncate">💬 {l.note}</span>}</div>
+                                                    <div className="flex items-center gap-3"><span className="text-white font-bold">{Math.round(l.seconds / 60)}m</span><button onClick={() => {if(confirm("刪除紀錄？")){ const storageUid = syncKey ? `shared_${syncKey}` : user.uid; db.collection(`artifacts/${appId}/users/${storageUid}/logs`).doc(l.id).delete(); }}} className="p-1.5 bg-red-500/10 text-red-500 rounded-lg transition-all active:scale-90"><Icon name="x" size={10} /></button></div>
                                                 </div>
                                             );
                                         })}
@@ -352,29 +355,13 @@
                                 )}
                                 <div className="space-y-4">
                                     <div className="space-y-2">
-                                        <div className="flex justify-between text-[10px] font-bold uppercase">
-                                            <span className="text-slate-500 flex items-center gap-1">
-                                                投入: {p.actualHours.toFixed(1)}h / 
-                                                {editingHoursId === p.id ? (
-                                                    <span className="inline-flex items-center gap-1 bg-black/50 px-1 rounded border border-blue-500/50"><input type="number" autoFocus className="w-10 bg-transparent text-white outline-none font-mono" value={tempHours} onChange={e => setTempHours(e.target.value)} onBlur={() => saveNewHours(p.id)} onKeyDown={e => e.key === 'Enter' && saveNewHours(p.id)} /><button onClick={() => saveNewHours(p.id)} className="text-green-500"><Icon name="check" size={10}/></button></span>
-                                                ) : (
-                                                    <span className="cursor-pointer hover:text-blue-400 inline-flex items-center gap-1" onClick={() => { setEditingHoursId(p.id); setTempHours(p.estHours); }}>預計: {p.estHours}h <Icon name="edit" size={8} className="text-slate-700"/></span>
-                                                )}
-                                            </span>
-                                            <span className={p.efficiency > 100 ? 'text-red-400' : 'text-blue-400'}>{p.efficiency.toFixed(0)}%</span>
-                                        </div>
+                                        <div className="flex justify-between text-[10px] font-bold uppercase"><span className="text-slate-500 flex items-center gap-1">投入: {p.actualHours.toFixed(1)}h / {editingHoursId === p.id ? (<span className="inline-flex items-center gap-1 bg-black/50 px-1 rounded border border-blue-500/50"><input type="number" autoFocus className="w-10 bg-transparent text-white outline-none font-mono" value={tempHours} onChange={e => setTempHours(e.target.value)} onBlur={() => saveNewHours(p.id)} onKeyDown={e => e.key === 'Enter' && saveNewHours(p.id)} /><button onClick={() => saveNewHours(p.id)} className="text-green-500"><Icon name="check" size={10}/></button></span>) : (<span className="cursor-pointer hover:text-blue-400 inline-flex items-center gap-1" onClick={() => { setEditingHoursId(p.id); setTempHours(p.estHours); }}>預計: {p.estHours}h <Icon name="edit" size={8} className="text-slate-700"/></span>)}</span><span className={p.efficiency > 100 ? 'text-red-400' : 'text-blue-400'}>{p.efficiency.toFixed(0)}%</span></div>
                                         <div className="h-2 bg-black rounded-full overflow-hidden border border-white/5"><div className={`h-full transition-all duration-1000 ${p.efficiency > 100 ? 'bg-red-500' : 'bg-blue-600'}`} style={{ width: `${Math.min(p.efficiency, 100)}%` }} /></div>
                                     </div>
                                     <div className="grid grid-cols-2 gap-2 mt-4">{p.phaseData.filter(ph => ph.percent > 0).map(ph => (<div key={ph.id} className="bg-black/20 p-2.5 rounded-xl flex items-center justify-between border border-white/5"><div className="flex items-center gap-2 overflow-hidden"><div className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ backgroundColor: ph.color }} /><span className="text-[10px] text-slate-400 truncate">{ph.name}</span></div><span className="text-[10px] font-mono font-bold" style={{ color: ph.color }}>{ph.percent.toFixed(0)}%</span></div>))}</div>
                                 </div>
                                 <div className="flex justify-between items-center pt-4 border-t border-white/5">
-                                    <div className="flex-1">
-                                        {p.deadline && (
-                                            <span className={`text-[10px] font-bold px-3 py-1.5 rounded-xl flex items-center gap-2 ${p.daysLeft < 3 ? 'bg-red-500/20 text-red-400 animate-pulse' : 'bg-white/5 text-slate-400'}`}>
-                                                <Icon name="calendar" size={12} /> {p.deadline.substring(5)} ({p.daysLeft}天)
-                                            </span>
-                                        )}
-                                    </div>
+                                    <div className="flex-1">{p.deadline && (<span className={`text-[10px] font-bold px-3 py-1.5 rounded-xl flex items-center gap-2 ${p.daysLeft < 3 ? 'bg-red-500/20 text-red-400 animate-pulse' : 'bg-white/5 text-slate-400'}`}><Icon name="calendar" size={12} /> {p.deadline.substring(5)} ({p.daysLeft}天)</span>)}</div>
                                     <button onClick={async () => { if(confirm("徹底刪除專案與數據？")) { const storageUid = syncKey ? `shared_${syncKey}` : user.uid; await db.collection(`artifacts/${appId}/users/${storageUid}/projects`).doc(p.id).delete(); } }} className="p-2.5 text-slate-700 hover:text-red-500 rounded-xl btn-active"><Icon name="trash-2" size={18}/></button>
                                 </div>
                             </div>
@@ -390,15 +377,12 @@
                                 <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase px-1">預估收益</label><input type="number" placeholder="NTD" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" value={newProject.estIncome} onChange={e => setNewProject({...newProject, estIncome: e.target.value})} /></div>
                                 <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase px-1">額外成本</label><input type="number" placeholder="NTD" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" value={newProject.cost} onChange={e => setNewProject({...newProject, cost: e.target.value})} /></div>
                             </div>
-                            <div className="grid grid-cols-2 gap-4">
-                                <div className="space-y-1.5"><label className="text-[10px] text-blue-400 font-bold uppercase px-1 tracking-tighter">執行日期</label><input type="date" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white" value={newProject.projectDate} onChange={e => setNewProject({...newProject, projectDate: e.target.value})} /></div>
-                                <div className="space-y-1.5"><label className="text-[10px] text-red-400 font-bold uppercase px-1 tracking-tighter">截稿日期</label><input type="date" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white" value={newProject.deadline} onChange={e => setNewProject({...newProject, deadline: e.target.value})} /></div>
-                            </div>
+                            <div className="grid grid-cols-2 gap-4"><div className="space-y-1.5"><label className="text-[10px] text-blue-400 font-bold uppercase px-1 tracking-tighter">執行日期</label><input type="date" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white" value={newProject.projectDate} onChange={e => setNewProject({...newProject, projectDate: e.target.value})} /></div><div className="space-y-1.5"><label className="text-[10px] text-red-400 font-bold uppercase px-1 tracking-tighter">截稿日期</label><input type="date" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white" value={newProject.deadline} onChange={e => setNewProject({...newProject, deadline: e.target.value})} /></div></div>
                             <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase px-1 tracking-widest">預計總時數 (h)</label><input type="number" placeholder="小時" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" value={newProject.estHours} onChange={e => setNewProject({...newProject, estHours: e.target.value})} /></div>
                             <button onClick={addProject} className="w-full py-5 rounded-[24px] font-bold text-lg shadow-xl btn-active mt-2 bg-blue-600 text-white transition-all">建立計畫</button>
                         </div>
                     </div>
-                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v5.4 • Final Polished</footer>
+                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v5.5 • Cloud Auto-Resume Ready</footer>
                 </div>
             );
         }
