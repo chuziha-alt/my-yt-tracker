@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>YT Editor Workflow Pro - stable</title>
+    <title>YT Editor Workflow Pro - Revenue Edit</title>
     <!-- 1. 核心樣式與框架 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -42,7 +42,7 @@
     <div id="root">
         <div class="flex flex-col items-center justify-center h-screen space-y-4 text-slate-500 text-center px-10">
             <div class="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse">系統優化裝載中...</div>
+            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse">介面優化裝載中...</div>
         </div>
     </div>
 
@@ -73,6 +73,7 @@
             );
         };
 
+        // --- Firebase 配置 ---
         const firebaseConfig = {
             apiKey: "AIzaSyAynuyz-WwDnwZaxtxqIzPygctuDw3V-j4",
             authDomain: "yt-editing-tracker.firebaseapp.com",
@@ -179,9 +180,8 @@
                     await db.collection(`artifacts/${appId}/users/${storageUid}/projects`).add(projectToSave);
                     setNewProject(initialNewProject);
                     alert("建立成功！");
-                } catch (err) {
-                    alert("建立失敗: " + err.code);
-                } finally { setIsAdding(false); }
+                } catch (err) { alert("建立失敗: " + err.code); } 
+                finally { setIsAdding(false); }
             };
 
             const saveNewIncome = async (projectId) => {
@@ -279,6 +279,7 @@
                         <div className="mobile-card p-5 flex flex-col justify-center items-center shadow-lg"><span className="text-[10px] text-slate-500 font-bold uppercase mb-1">平均時薪</span><span className="text-3xl font-bold text-green-400 font-mono tracking-tighter">${stats.length > 0 ? Math.round(stats.reduce((a, b) => a + b.actualHourlyRate, 0) / stats.length) : 0}/h</span></div>
                     </div>
 
+                    {/* 專案分析清單 */}
                     <div className="space-y-4">
                         <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2"><Icon name="target" size={14} color="#ec4899" /> 專案成效分析</h2>
                         {stats.map(p => (
@@ -293,18 +294,21 @@
                                     </div>
                                     <div className="text-right flex flex-col items-end">
                                         <div className="text-xl font-bold text-green-400 font-mono tracking-tighter">${Math.round(p.actualHourlyRate)}/h</div>
-                                        <div className="flex items-center gap-1 group">
+                                        
+                                        {/* 修改預估收入 (直接編輯收入，淨利會連動) */}
+                                        <div className="flex flex-col items-end gap-0.5 mt-1">
                                             {editingIncomeId === p.id ? (
-                                                <div className="flex items-center gap-1 bg-black/50 p-1 rounded-lg border border-blue-500/50 mt-1">
+                                                <div className="flex items-center gap-1 bg-black/50 p-1 rounded-lg border border-blue-500/50">
                                                     <input type="number" autoFocus className="w-16 bg-transparent text-[10px] text-white outline-none font-bold" value={tempIncome} onChange={e => setTempIncome(e.target.value)} onBlur={() => saveNewIncome(p.id)} onKeyDown={e => e.key === 'Enter' && saveNewIncome(p.id)} />
                                                     <button onClick={() => saveNewIncome(p.id)} className="text-green-500"><Icon name="check" size={12}/></button>
                                                 </div>
                                             ) : (
-                                                <div className="flex items-center gap-1 mt-1 cursor-pointer hover:opacity-80" onClick={() => { setEditingIncomeId(p.id); setTempIncome(p.estIncome); }}>
-                                                    <span className="text-[9px] text-slate-500 font-bold uppercase">淨利: ${p.netIncome.toLocaleString()}</span>
-                                                    <Icon name="edit" size={10} className="text-slate-700 group-hover:text-blue-500 transition-colors"/>
+                                                <div className="flex items-center gap-1 cursor-pointer hover:opacity-80" onClick={() => { setEditingIncomeId(p.id); setTempIncome(p.estIncome); }}>
+                                                    <span className="text-[9px] text-slate-400 font-bold uppercase">預估收入: ${p.estIncome.toLocaleString()}</span>
+                                                    <Icon name="edit" size={10} className="text-slate-700"/>
                                                 </div>
                                             )}
+                                            <span className="text-[9px] text-slate-600 font-bold uppercase">淨利: ${p.netIncome.toLocaleString()}</span>
                                         </div>
                                     </div>
                                 </div>
@@ -361,12 +365,7 @@
                                             </span>
                                         ) : null}
                                     </div>
-                                    <button 
-                                        onClick={async () => { if(confirm("徹底刪除專案與數據？")) { const storageUid = syncKey ? `shared_${syncKey}` : user.uid; await db.collection(`artifacts/${appId}/users/${storageUid}/projects`).doc(p.id).delete(); } }} 
-                                        className="p-2.5 text-slate-700 hover:text-red-500 rounded-xl btn-active"
-                                    >
-                                        <Icon name="trash-2" size={18}/>
-                                    </button>
+                                    <button onClick={async () => { if(confirm("徹底刪除專案與數據？")) { const storageUid = syncKey ? `shared_${syncKey}` : user.uid; await db.collection(`artifacts/${appId}/users/${storageUid}/projects`).doc(p.id).delete(); } }} className="p-2.5 text-slate-700 hover:text-red-500 rounded-xl btn-active"><Icon name="trash-2" size={18}/></button>
                                 </div>
                             </div>
                         ))}
@@ -386,7 +385,7 @@
                             <button onClick={addProject} disabled={isAdding} className={`w-full py-5 rounded-[24px] font-bold text-lg shadow-xl btn-active mt-2 transition-all ${isAdding ? 'bg-slate-700 text-slate-400' : 'bg-blue-600 text-white'}`}>{isAdding ? '建立中...' : '建立計畫'}</button>
                         </div>
                     </div>
-                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v4.8 • UI Optimized</footer>
+                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v4.9 • Dynamic Income Editing</footer>
                 </div>
             );
         }
