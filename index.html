@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>YT Editor Workflow Pro - Smart Archive</title>
+    <title>YT Editor Workflow Pro - Complete View</title>
     <!-- 1. 核心框架 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -45,7 +45,7 @@
     <div id="root">
         <div class="flex flex-col items-center justify-center h-screen space-y-4 text-slate-500 text-center px-10">
             <div class="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse">正在載入歸檔管理系統...</div>
+            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse">正在載入專案數據分析...</div>
         </div>
     </div>
 
@@ -121,22 +121,15 @@
             const [projects, setProjects] = useState([]);
             const [logs, setLogs] = useState([]);
             const [now, setNow] = useState(new Date());
-
-            // 歸檔月份展開狀態
             const [expandedMonth, setExpandedMonth] = useState(null);
-
             const [showBreakAlert, setShowBreakAlert] = useState(false);
             const lastAlertSec = useRef(0);
             const audioCtx = useRef(null);
-
             const [displaySeconds, setDisplaySeconds] = useState(0); 
             const [activeSession, setActiveSession] = useState(null); 
-
             const [activeProjectId, setActiveProjectId] = useState('');
             const [activePhase, setActivePhase] = useState(PHASES[0].id);
             const [sessionNote, setSessionNote] = useState('');
-
-            // 修改數據用 State
             const [editingIncomeId, setEditingIncomeId] = useState(null);
             const [editingHoursId, setEditingHoursId] = useState(null);
             const [editingDeadlineId, setEditingDeadlineId] = useState(null);
@@ -188,21 +181,10 @@
                     if (currentSec > 0 && currentSec % 3000 === 0 && lastAlertSec.current !== currentSec) {
                         lastAlertSec.current = currentSec;
                         setShowBreakAlert(true);
-                        triggerSound();
                     }
                 }, 1000);
                 return () => clearInterval(itv);
             }, [activeSession]);
-
-            const triggerSound = () => {
-                if (!audioCtx.current) return;
-                const osc = audioCtx.current.createOscillator();
-                const gain = audioCtx.current.createGain();
-                osc.type = 'sine'; osc.frequency.setValueAtTime(880, audioCtx.current.currentTime);
-                gain.gain.setValueAtTime(0.1, audioCtx.current.currentTime);
-                osc.connect(gain); gain.connect(audioCtx.current.destination);
-                osc.start(); osc.stop(audioCtx.current.currentTime + 0.5);
-            };
 
             const finalizeAuto = async (data, storageUid) => {
                 if (data.baseTime <= 0) { await db.collection(`artifacts/${appId}/users/${storageUid}/activeSession`).doc('current').delete(); return; }
@@ -272,7 +254,7 @@
                 finally { setIsAdding(false); }
             };
 
-            // --- 核心邏輯：數據處理、結案判斷、歸檔分組 ---
+            // --- 核心數據統計 ---
             const todayHours = useMemo(() => {
                 const today = new Date().toISOString().split('T')[0];
                 const seconds = logs.filter(l => l.date && l.date.startsWith(today)).reduce((sum, log) => sum + log.seconds, 0);
@@ -295,10 +277,8 @@
                         percent: actualSeconds > 0 ? (pLogs.filter(l => l.phase === ph.id).reduce((a, c) => a + c.seconds, 0) / actualSeconds) * 100 : 0
                     }));
 
-                    // 結案判斷：當前日期已過截稿日
                     const deadlineDate = p.deadline ? new Date(p.deadline) : null;
-                    const today = new Date();
-                    today.setHours(0,0,0,0);
+                    const today = new Date(); today.setHours(0,0,0,0);
                     const isClosed = deadlineDate && deadlineDate < today;
 
                     return { 
@@ -311,14 +291,10 @@
                 return processed.sort((a, b) => new Date(b.projectDate) - new Date(a.projectDate));
             }, [logs, projects]);
 
-            // 下拉選單過濾：不含結案，按業主排序
             const activeProjectsDropdown = useMemo(() => {
-                return stats
-                    .filter(p => !p.isClosed)
-                    .sort((a, b) => a.client.localeCompare(b.client, 'zh-Hant'));
+                return stats.filter(p => !p.isClosed).sort((a, b) => a.client.localeCompare(b.client, 'zh-Hant'));
             }, [stats]);
 
-            // 歸檔分組：按執行日月份分組
             const archivedGroups = useMemo(() => {
                 const closed = stats.filter(p => p.isClosed);
                 const groups = {};
@@ -331,7 +307,7 @@
                 return groups;
             }, [stats]);
 
-            if (isLoading && !user) return <div className="flex items-center justify-center h-screen text-slate-500 font-mono animate-pulse uppercase tracking-[0.2em]">Connecting master database...</div>;
+            if (isLoading && !user) return <div className="flex items-center justify-center h-screen text-slate-500 font-mono animate-pulse uppercase tracking-[0.2em]">Connecting...</div>;
 
             const renderProjectCard = (p) => (
                 <div key={p.id} className="mobile-card p-6 space-y-5 shadow-2xl transition-all border-white/5 border hover:border-white/10 mb-4">
@@ -362,14 +338,31 @@
                                 <span className="text-slate-500 flex items-center gap-1 font-mono">投入: {p.actualHours.toFixed(1)}h / {editingHoursId === p.id ? (<span className="inline-flex items-center gap-1 bg-black/50 px-1 rounded border border-blue-500/50"><input type="number" autoFocus className="w-10 bg-transparent text-white outline-none text-[10px]" value={tempValue} onChange={e => setTempValue(e.target.value)} onBlur={() => updateProjectData(p.id, 'estHours', parseFloat(tempValue) || 0)} onKeyDown={e => e.key === 'Enter' && updateProjectData(p.id, 'estHours', parseFloat(tempValue) || 0)} /><button onClick={() => updateProjectData(p.id, 'estHours', parseFloat(tempValue) || 0)} className="text-green-500"><Icon name="check" size={10}/></button></span>) : (<span className="cursor-pointer hover:text-blue-400 inline-flex items-center gap-1 group" onClick={() => { setEditingHoursId(p.id); setTempValue(p.estHours); }}>預計: {p.estHours}h <Icon name="edit" size={8} className="text-slate-700 group-hover:text-blue-500"/></span>)}</span>
                                 <span className={p.efficiency > 100 ? 'text-red-400' : 'text-blue-400'}>{p.efficiency.toFixed(0)}%</span>
                             </div>
-                            <div className="h-2 bg-black rounded-full overflow-hidden flex border border-white/5 shadow-inner">
+                            
+                            {/* 彩色比例進度條 */}
+                            <div className="h-2.5 bg-black rounded-full overflow-hidden flex border border-white/5 shadow-inner">
                                 {p.phaseData.map(ph => ph.percent > 0 && (<div key={ph.id} style={{ width: `${ph.percent}%`, backgroundColor: ph.color }} className="h-full border-r border-black/20 last:border-0" />))}
                             </div>
+
+                            {/* --- 工作環節時間統計區 --- */}
+                            <div className="grid grid-cols-2 gap-2 mt-4">
+                                {p.phaseData.filter(ph => ph.percent > 0).map(ph => (
+                                    <div key={ph.id} className="bg-black/20 p-2.5 rounded-xl flex items-center justify-between border border-white/5 shadow-sm">
+                                        <div className="flex items-center gap-2 overflow-hidden">
+                                            <div className="w-1.5 h-1.5 rounded-full flex-shrink-0 shadow-[0_0_5px_rgba(255,255,255,0.1)]" style={{ backgroundColor: ph.color }} />
+                                            <span className="text-[10px] text-slate-400 truncate font-semibold">{ph.name}</span>
+                                        </div>
+                                        <span className="text-[10px] font-mono font-bold" style={{ color: ph.color }}>{ph.percent.toFixed(0)}%</span>
+                                    </div>
+                                ))}
+                            </div>
                         </div>
+
                         <div className="flex items-center gap-4 bg-black/40 p-4 rounded-2xl border border-white/5 shadow-inner">
                             <Icon name="alert-circle" size={18} className={p.efficiency > 105 ? 'text-orange-500' : 'text-blue-500'} />
                             <div className="flex-1 text-xs italic text-slate-400">"{p.comment}"</div>
                         </div>
+
                         <div className="flex justify-between items-center pt-2">
                             <div className="flex-1">
                                 {editingDeadlineId === p.id ? (
@@ -377,7 +370,7 @@
                                 ) : (
                                     p.isClosed ? (
                                         <span onClick={() => { setEditingDeadlineId(p.id); setTempValue(p.deadline); }} className="text-[10px] font-bold px-3 py-1.5 rounded-xl bg-slate-800 text-slate-500 flex items-center gap-2 cursor-pointer border border-white/5">
-                                            <Icon name="archive" size={12} /> 已結案 (結於 {p.deadline.substring(5)})
+                                            <Icon name="archive" size={12} /> 已結案 (截稿: {p.deadline.substring(5)})
                                         </span>
                                     ) : (
                                         p.deadline ? (
@@ -388,7 +381,7 @@
                                     )
                                 )}
                             </div>
-                            <button onClick={async () => { if(confirm("徹底刪除專案？")) { const storageUid = syncKey ? `shared_${syncKey}` : user.uid; await db.collection(`artifacts/${appId}/users/${storageUid}/projects`).doc(p.id).delete(); } }} className="p-2.5 text-slate-700 hover:text-red-500 transition-all active:scale-90"><Icon name="trash-2" size={18}/></button>
+                            <button onClick={async () => { if(confirm("確定徹底刪除專案？")) { const storageUid = syncKey ? `shared_${syncKey}` : user.uid; await db.collection(`artifacts/${appId}/users/${storageUid}/projects`).doc(p.id).delete(); } }} className="p-2.5 text-slate-700 hover:text-red-500 transition-all active:scale-90"><Icon name="trash-2" size={18}/></button>
                         </div>
                     </div>
                 </div>
@@ -397,7 +390,6 @@
             return (
                 <div className="max-w-md mx-auto px-4 py-6 space-y-6 pb-24 relative">
                     
-                    {/* 50 分鐘提醒彈窗 */}
                     {showBreakAlert && (
                         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-xl p-6">
                             <div className="mobile-card p-8 w-full max-w-xs text-center border-2 border-blue-500 shadow-2xl animate-alert">
@@ -414,7 +406,6 @@
                         <button onClick={() => setShowSyncModal(true)} className="p-2.5 bg-white/5 rounded-2xl text-slate-400 btn-active"><Icon name="settings" size={22} /></button>
                     </header>
 
-                    {/* 控制區：已依業主名字排序，排除結案 */}
                     <div className="mobile-card p-4 sm:p-6 space-y-6 shadow-2xl border-white/5 border-2">
                         <div className="space-y-4">
                             <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">執行專案 (依業主排序)</label><select className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white outline-none focus:ring-2 ring-blue-500 appearance-none shadow-inner" value={activeProjectId} onChange={e => setActiveProjectId(e.target.value)} disabled={activeSession?.isRunning}><option value="">-- 選擇專案 --</option>{activeProjectsDropdown.map(p => <option key={p.id} value={p.id}>{p.client} | {p.name}</option>)}</select></div>
@@ -436,27 +427,22 @@
                         <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold mb-1 uppercase tracking-tighter">總淨利</span><span className="text-lg font-bold text-blue-400 font-mono">${stats.reduce((a, b) => a + b.netIncome, 0).toLocaleString()}</span></div>
                     </div>
 
-                    {/* 列表區：僅顯示未結案專案 */}
                     <div className="space-y-4">
-                        <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2"><Icon name="target" size={14} color="#ec4899" /> 專案進度分析</h2>
+                        <h2 className="text-sm font-bold text-slate-500 uppercase tracking-widest px-1 flex items-center gap-2"><Icon name="target" size={14} color="#ec4899" /> 進行中專案分析</h2>
                         {stats.filter(p => !p.isClosed).length === 0 ? (
-                            <div className="mobile-card p-10 text-center text-slate-600 text-xs font-bold uppercase tracking-[0.3em]">目前沒有進行中的專案</div>
+                            <div className="mobile-card p-10 text-center text-slate-600 text-xs font-bold uppercase tracking-[0.3em]">目前沒有執行中的專案</div>
                         ) : (
                             stats.filter(p => !p.isClosed).map(p => renderProjectCard(p))
                         )}
 
-                        {/* 歸檔專案區：依月份收納 */}
                         <div className="pt-6 space-y-4">
                             <h2 className="text-sm font-bold text-slate-700 uppercase tracking-widest px-1 flex items-center gap-2"><Icon name="archive" size={14} color="#64748b" /> 歷程存檔 (已結案)</h2>
                             {Object.keys(archivedGroups).length === 0 ? (
-                                <div className="text-[10px] text-slate-800 text-center uppercase py-4 font-bold">尚無歸檔數據</div>
+                                <div className="text-[10px] text-slate-800 text-center uppercase py-4 font-bold tracking-widest">尚無結案數據</div>
                             ) : (
                                 Object.keys(archivedGroups).sort((a,b) => b.localeCompare(a)).map(month => (
                                     <div key={month} className="space-y-2">
-                                        <button 
-                                            onClick={() => setExpandedMonth(expandedMonth === month ? null : month)}
-                                            className="w-full flex justify-between items-center bg-white/5 p-4 rounded-2xl border border-white/5 active:bg-white/10 transition-all"
-                                        >
+                                        <button onClick={() => setExpandedMonth(expandedMonth === month ? null : month)} className="w-full flex justify-between items-center bg-white/5 p-4 rounded-2xl border border-white/5 active:bg-white/10 transition-all">
                                             <span className="text-xs font-bold text-slate-400 flex items-center gap-2"><Icon name="calendar" size={12} /> {month}</span>
                                             <div className="flex items-center gap-3">
                                                 <span className="text-[10px] bg-slate-800 text-slate-500 px-2 py-0.5 rounded-lg">{archivedGroups[month].length} 專案</span>
@@ -488,7 +474,7 @@
                             <button onClick={addProject} className="w-full py-5 rounded-[24px] font-bold text-lg shadow-xl btn-active mt-2 bg-blue-600 text-white transition-all">建立計畫</button>
                         </div>
                     </div>
-                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v6.5 • Smart Archive Edition</footer>
+                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v6.6 • Detailed Breakdown Ready</footer>
                 </div>
             );
         }
