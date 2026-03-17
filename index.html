@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>YT Editor Workflow Pro - Final Fixed</title>
+    <title>YT Editor Workflow Pro - Automation Fixed v7.2</title>
     <!-- 1. 核心框架 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -52,7 +52,6 @@
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
 
-        // --- 全域工具函數 ---
         const formatTime = (seconds) => {
             if (!seconds || seconds < 0) return "00:00:00";
             const h = Math.floor(seconds / 3600);
@@ -233,36 +232,40 @@
                 const targetProject = projects.find(p => p.id === activeSession.projectId);
                 const phaseName = PHASES.find(ph => ph.id === activeSession.phase)?.name || '未分類';
                 
-                // --- 數據格式優化 ---
-                const totalMinutes = Math.floor(displaySeconds / 60);
-                const hours = Math.floor(displaySeconds / 3600);
-                const remainingMinutes = Math.floor((displaySeconds % 3600) / 60);
-                const finalHoursDecimal = (displaySeconds / 3600).toFixed(2);
+                // --- 數據格式優化與強制轉型 ---
+                const finalSeconds = Number(displaySeconds) || 0;
+                const totalMinutesNum = Math.floor(finalSeconds / 60);
+                const hrs = Math.floor(finalSeconds / 3600);
+                const remainingMins = Math.floor((finalSeconds % 3600) / 60);
+                const finalHoursDecimal = parseFloat((finalSeconds / 3600).toFixed(2));
                 
-                // 易讀文字，例如 "45m" 或 "1h 12m"
-                const durationText = hours > 0 ? `${hours}h ${remainingMinutes}m` : `${remainingMinutes}m`;
-
+                const durationTextStr = hrs > 0 ? `${hrs}h ${remainingMins}m` : `${remainingMins}m`;
+                
                 try { 
+                    // 1. 本地 Firebase 存檔
                     await db.collection(`artifacts/${appId}/users/${storageUid}/logs`).add({ 
                         projectId: activeSession.projectId, phase: activeSession.phase, 
-                        note: sessionNote, seconds: displaySeconds, date: new Date().toISOString(), timestamp: Date.now(), 
+                        note: sessionNote, seconds: finalSeconds, date: new Date().toISOString(), timestamp: Date.now(), 
                         displayStartTime: new Date(activeSession.sessionStartTimeStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
                         displayEndTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
                     }); 
                     
+                    // 2. 發送給 Notion Webhook (加強型別安全性)
                     if (notionUrl && notionUrl.startsWith('http')) {
+                        const payload = { 
+                            project: String(targetProject?.name || '未知專案'), 
+                            client: String(targetProject?.client || '未知客戶'), 
+                            phase: String(phaseName), 
+                            hours: Number(finalHoursDecimal), 
+                            total_minutes: Number(totalMinutesNum), // 強制確保為 Number
+                            duration_text: String(durationTextStr),
+                            note: String(sessionNote || ""), 
+                            date: new Date().toISOString().split('T')[0] 
+                        };
+
                         fetch(notionUrl, {
                             method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ 
-                                project: targetProject?.name || '未知專案', 
-                                client: targetProject?.client || '未知客戶', 
-                                phase: phaseName, 
-                                hours: parseFloat(finalHoursDecimal), 
-                                total_minutes: totalMinutes,
-                                duration_text: durationText, // 新增：易讀文字欄位
-                                note: sessionNote, 
-                                date: new Date().toISOString().split('T')[0] 
-                            })
+                            body: JSON.stringify(payload)
                         }).catch(e => console.error("Notion Sync Error:", e));
                     }
 
@@ -293,7 +296,6 @@
                 finally { setIsAdding(false); }
             };
 
-            // --- 修復與補回核心數據變數 ---
             const todayHours = useMemo(() => {
                 const todayStr = new Date().toISOString().split('T')[0];
                 const seconds = logs
@@ -381,6 +383,7 @@
                                 <span className="text-slate-500 flex items-center gap-1 font-mono">投入: {p.actualHours?.toFixed(1)}h / {editingHoursId === p.id ? (<span className="inline-flex items-center gap-1 bg-black/50 px-1 rounded border border-blue-500/50"><input type="number" autoFocus className="w-10 bg-transparent text-white outline-none text-[10px]" value={tempValue} onChange={e => setTempValue(e.target.value)} onBlur={() => updateProjectData(p.id, 'estHours', parseFloat(tempValue) || 0)} onKeyDown={e => e.key === 'Enter' && updateProjectData(p.id, 'estHours', parseFloat(tempValue) || 0)} /><button onClick={() => updateProjectData(p.id, 'estHours', parseFloat(tempValue) || 0)} className="text-green-500"><Icon name="check" size={10}/></button></span>) : (<span className="cursor-pointer hover:text-blue-400 inline-flex items-center gap-1 group" onClick={() => { setEditingHoursId(p.id); setTempValue(p.estHours); }}>預計: {p.estHours}h <Icon name="edit" size={8} className="text-slate-700 group-hover:text-blue-500"/></span>)}</span>
                                 <span className={p.efficiency > 100 ? 'text-red-400' : 'text-blue-400'}>{p.efficiency?.toFixed(0)}%</span>
                             </div>
+                            {/* 彩色比例進度條 */}
                             <div className="h-2.5 bg-black rounded-full overflow-hidden flex border border-white/5 shadow-inner">
                                 {p.phaseData.map(ph => ph.percent > 0 && (<div key={ph.id} style={{ width: `${ph.percent}%`, backgroundColor: ph.color }} className="h-full border-r border-black/20 last:border-0" />))}
                             </div>
@@ -504,12 +507,12 @@
                                 <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase px-1 tracking-widest">預估收益</label><input type="number" placeholder="NTD" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" value={newProject.estIncome} onChange={e => setNewProject({...newProject, estIncome: e.target.value})} /></div>
                                 <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase px-1 tracking-widest">額外成本</label><input type="number" placeholder="NTD" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" value={newProject.cost} onChange={e => setNewProject({...newProject, cost: e.target.value})} /></div>
                             </div>
-                            <div className="grid grid-cols-2 gap-4"><div className="space-y-1.5"><label className="text-[10px] text-blue-400 font-bold uppercase px-1 tracking-tighter">執行日期</label><input type="date" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" value={newProject.projectDate} onChange={e => setNewProject({...newProject, projectDate: e.target.value})} /></div><div className="space-y-1.5"><label className="text-[10px] text-red-400 font-bold uppercase px-1 tracking-tighter">截稿日期</label><input type="date" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" value={newProject.deadline} onChange={e => setNewProject({...newProject, deadline: e.target.value})} /></div></div>
+                            <div className="grid grid-cols-2 gap-4"><div className="space-y-1.5"><label className="text-[10px] text-blue-400 font-bold uppercase px-1 tracking-tighter">執行日期</label><input type="date" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" value={newProject.projectDate} onChange={e => setNewProject({...newProject, projectDate: e.target.value})} /></div><div className="space-y-1.5"><label className="text-[10px] text-red-400 font-bold uppercase px-1 tracking-tighter">截稿日期</label><input type="date" className="w-full bg-black border border-blue-900/30 p-4 rounded-2xl text-white outline-none shadow-inner" value={newProject.deadline} onChange={e => setNewProject({...newProject, deadline: e.target.value})} /></div></div>
                             <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase px-1 tracking-widest">預計總時數 (h)</label><input type="number" placeholder="小時" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none shadow-inner" value={newProject.estHours} onChange={e => setNewProject({...newProject, estHours: e.target.value})} /></div>
                             <button onClick={addProject} className="w-full py-5 rounded-[24px] font-bold text-lg shadow-xl btn-active mt-2 bg-blue-600 text-white transition-all">建立計畫</button>
                         </div>
                     </div>
-                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v6.9 • Persistence & Fix Ready</footer>
+                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v7.2 • Automation Ready</footer>
                 </div>
             );
         }
