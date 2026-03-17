@@ -232,8 +232,16 @@
                 const storageUid = syncKey ? `shared_${syncKey}` : user.uid;
                 const targetProject = projects.find(p => p.id === activeSession.projectId);
                 const phaseName = PHASES.find(ph => ph.id === activeSession.phase)?.name || '未分類';
-                const finalHours = (displaySeconds / 3600).toFixed(2);
                 
+                // --- 數據格式優化 ---
+                const totalMinutes = Math.floor(displaySeconds / 60);
+                const hours = Math.floor(displaySeconds / 3600);
+                const remainingMinutes = Math.floor((displaySeconds % 3600) / 60);
+                const finalHoursDecimal = (displaySeconds / 3600).toFixed(2);
+                
+                // 易讀文字，例如 "45m" 或 "1h 12m"
+                const durationText = hours > 0 ? `${hours}h ${remainingMinutes}m` : `${remainingMinutes}m`;
+
                 try { 
                     await db.collection(`artifacts/${appId}/users/${storageUid}/logs`).add({ 
                         projectId: activeSession.projectId, phase: activeSession.phase, 
@@ -245,7 +253,16 @@
                     if (notionUrl && notionUrl.startsWith('http')) {
                         fetch(notionUrl, {
                             method: 'POST', headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({ project: targetProject?.name || '未知專案', client: targetProject?.client || '未知客戶', phase: phaseName, hours: parseFloat(finalHours), note: sessionNote, date: new Date().toISOString().split('T')[0] })
+                            body: JSON.stringify({ 
+                                project: targetProject?.name || '未知專案', 
+                                client: targetProject?.client || '未知客戶', 
+                                phase: phaseName, 
+                                hours: parseFloat(finalHoursDecimal), 
+                                total_minutes: totalMinutes,
+                                duration_text: durationText, // 新增：易讀文字欄位
+                                note: sessionNote, 
+                                date: new Date().toISOString().split('T')[0] 
+                            })
                         }).catch(e => console.error("Notion Sync Error:", e));
                     }
 
@@ -440,7 +457,7 @@
                             <div className="px-3 space-y-3">
                                 {(!activeSession || !activeSession.isRunning) ? <button onClick={startTimer} style={{ backgroundColor: activeProjectId ? currentPhaseColor : '#334155' }} className="w-full py-5 text-white rounded-[24px] font-bold text-lg sm:text-xl shadow-xl flex items-center justify-center gap-3 btn-active"><Icon name="play" fill="currentColor" size={24} /> 開始計時</button>
                                 : <button onClick={pauseTimer} className="w-full py-5 bg-orange-600/90 text-white rounded-[24px] font-bold text-lg sm:text-xl btn-active flex items-center justify-center gap-3"><Icon name="pause" fill="currentColor" size={24} /> 休息一下</button>}
-                                {displaySeconds > 0 && <button onClick={stopTimer} className="w-full py-2 text-red-500 text-[11px] font-bold uppercase tracking-[0.3em] opacity-80 hover:opacity-100">結束存檔</button>}
+                                {displaySeconds > 0 && <button onClick={stopTimer} className="w-full py-2 text-red-500 text-[11px] font-bold uppercase tracking-[0.3em] opacity-80 hover:opacity-100 transition-opacity">結束並存檔</button>}
                             </div>
                         </div>
                         <div className="flex items-center gap-3 bg-black/30 p-4 rounded-2xl border border-white/5 shadow-inner mx-1"><Icon name="message-square" size={16} className="text-slate-600" /><input type="text" placeholder="本次筆記..." className="bg-transparent text-xs text-slate-300 outline-none w-full" value={sessionNote} onChange={e => setSessionNote(e.target.value)} /></div>
