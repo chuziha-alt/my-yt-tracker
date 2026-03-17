@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>YT Editor Workflow Pro - Notion Sync</title>
+    <title>YT Editor Workflow Pro - Final Fixed</title>
     <!-- 1. 核心框架 -->
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -45,14 +45,16 @@
     <div id="root">
         <div class="flex flex-col items-center justify-center h-screen space-y-4 text-slate-500 text-center px-10">
             <div class="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin"></div>
-            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse">正在載入自動化同步模組...</div>
+            <div class="font-mono text-xs uppercase tracking-[0.3em] animate-pulse">正在載入肝片大師...</div>
         </div>
     </div>
 
     <script type="text/babel">
         const { useState, useEffect, useMemo, useRef } = React;
 
+        // --- 全域工具函數 ---
         const formatTime = (seconds) => {
+            if (!seconds || seconds < 0) return "00:00:00";
             const h = Math.floor(seconds / 3600);
             const m = Math.floor((seconds % 3600) / 60);
             const s = seconds % 60;
@@ -73,6 +75,7 @@
                 "trash-2": <path d="M3 6h18M19 6v14c0 1-1 2-2 2H7c-1 0-2-1-2-2V6M8 6V4c0-1 1-2 2-2h4c1 0 2 1 2 2v2M10 11v6M14 11v6"/>,
                 "calendar": <g><rect width="18" height="18" x="3" y="4" rx="2" ry="2"/><path d="M16 2v4M8 2v4M3 10h18"/></g>,
                 "message-square": <path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/>,
+                "clock": <g><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></g>,
                 "heart-pulse": <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" />,
                 "alert-circle": <g><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></g>,
                 "archive": <path d="M21 8v13H3V8M1 3h22v5H1V3m10 8h2"/>,
@@ -117,8 +120,6 @@
             const [isLoading, setIsLoading] = useState(true);
             const [isAdding, setIsAdding] = useState(false);
             const [syncKey, setSyncKey] = useState(localStorage.getItem('yt_editor_sync_id') || '');
-            
-            // --- Notion Webhook URL ---
             const [notionUrl, setNotionUrl] = useState(localStorage.getItem('notion_webhook_url') || '');
             const [showSyncModal, setShowSyncModal] = useState(false);
             
@@ -129,6 +130,7 @@
             const [showBreakAlert, setShowBreakAlert] = useState(false);
             const lastAlertSec = useRef(0);
             const audioCtx = useRef(null);
+
             const [displaySeconds, setDisplaySeconds] = useState(0); 
             const [activeSession, setActiveSession] = useState(null); 
             const [activeProjectId, setActiveProjectId] = useState('');
@@ -166,9 +168,14 @@
                     if (doc.exists) {
                         const data = doc.data();
                         setActiveSession(data);
-                        setActiveProjectId(data.projectId);
-                        setActivePhase(data.phase);
-                        setSessionNote(data.note || '');
+                        if (data.isRunning) {
+                            setActiveProjectId(data.projectId);
+                            setActivePhase(data.phase);
+                            setSessionNote(data.note || '');
+                        }
+                        if (!data.isRunning && data.pausedAt && (Date.now() - data.pausedAt > 600000)) { 
+                            finalizeAuto(data, storageUid); 
+                        }
                     } else { setActiveSession(null); }
                 });
                 return () => { unsubP(); unsubL(); unsubS(); };
@@ -189,8 +196,20 @@
                 return () => clearInterval(itv);
             }, [activeSession]);
 
+            const finalizeAuto = async (data, storageUid) => {
+                if (data.baseTime <= 0) { await db.collection(`artifacts/${appId}/users/${storageUid}/activeSession`).doc('current').delete(); return; }
+                await db.collection(`artifacts/${appId}/users/${storageUid}/logs`).add({ 
+                    projectId: data.projectId, phase: data.phase, note: (data.note || "") + " (自動結算)", 
+                    seconds: data.baseTime, date: new Date().toISOString(), timestamp: Date.now(),
+                    displayStartTime: new Date(data.sessionStartTimeStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+                    displayEndTime: new Date(data.pausedAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+                });
+                await db.collection(`artifacts/${appId}/users/${storageUid}/activeSession`).doc('current').delete();
+                setDisplaySeconds(0);
+            };
+
             const startTimer = async () => { 
-                if (!activeProjectId) { alert("請選擇專案！"); return; } 
+                if (!activeProjectId) { alert("請先選擇專案！"); return; } 
                 if (!audioCtx.current) audioCtx.current = new (window.AudioContext || window.webkitAudioContext)();
                 const storageUid = syncKey ? `shared_${syncKey}` : user.uid;
                 await db.collection(`artifacts/${appId}/users/${storageUid}/activeSession`).doc('current').set({
@@ -208,7 +227,6 @@
                 });
             };
 
-            // --- 修改後的 stopTimer：新增 Notion 自動同步 ---
             const stopTimer = async () => {
                 if (displaySeconds === 0 || !activeSession) return;
                 const storageUid = syncKey ? `shared_${syncKey}` : user.uid;
@@ -216,30 +234,18 @@
                 const phaseName = PHASES.find(ph => ph.id === activeSession.phase)?.name || '未分類';
                 const finalHours = (displaySeconds / 3600).toFixed(2);
                 
-                const logData = { 
-                    projectId: activeSession.projectId, phase: activeSession.phase, 
-                    note: sessionNote, seconds: displaySeconds, date: new Date().toISOString(), timestamp: Date.now(), 
-                    displayStartTime: new Date(activeSession.sessionStartTimeStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
-                    displayEndTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
-                };
-
                 try { 
-                    // 1. 儲存到雲端資料庫
-                    await db.collection(`artifacts/${appId}/users/${storageUid}/logs`).add(logData); 
+                    await db.collection(`artifacts/${appId}/users/${storageUid}/logs`).add({ 
+                        projectId: activeSession.projectId, phase: activeSession.phase, 
+                        note: sessionNote, seconds: displaySeconds, date: new Date().toISOString(), timestamp: Date.now(), 
+                        displayStartTime: new Date(activeSession.sessionStartTimeStr).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }), 
+                        displayEndTime: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }) 
+                    }); 
                     
-                    // 2. 如果有設定 Notion Webhook，發送同步
                     if (notionUrl && notionUrl.startsWith('http')) {
                         fetch(notionUrl, {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                project: targetProject?.name || '未知專案',
-                                client: targetProject?.client || '未知客戶',
-                                phase: phaseName,
-                                hours: parseFloat(finalHours),
-                                note: sessionNote,
-                                date: new Date().toISOString().split('T')[0]
-                            })
+                            method: 'POST', headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ project: targetProject?.name || '未知專案', client: targetProject?.client || '未知客戶', phase: phaseName, hours: parseFloat(finalHours), note: sessionNote, date: new Date().toISOString().split('T')[0] })
                         }).catch(e => console.error("Notion Sync Error:", e));
                     }
 
@@ -270,30 +276,35 @@
                 finally { setIsAdding(false); }
             };
 
+            // --- 修復與補回核心數據變數 ---
             const todayHours = useMemo(() => {
-                const today = new Date().toISOString().split('T')[0];
-                const seconds = logs.filter(l => l.date && l.date.startsWith(today)).reduce((sum, log) => sum + log.seconds, 0);
+                const todayStr = new Date().toISOString().split('T')[0];
+                const seconds = logs
+                    .filter(l => l.date && l.date.startsWith(todayStr))
+                    .reduce((sum, log) => sum + (log.seconds || 0), 0);
                 return (seconds / 3600).toFixed(1);
             }, [logs]);
 
             const stats = useMemo(() => {
                 if (!projects.length) return [];
-                const processed = projects.map(p => {
+                const today = new Date(); today.setHours(0,0,0,0);
+                
+                return projects.map(p => {
                     const pLogs = logs.filter(l => l.projectId === p.id);
-                    const actualSeconds = pLogs.reduce((a, c) => a + c.seconds, 0);
+                    const actualSeconds = pLogs.reduce((a, c) => a + (c.seconds || 0), 0);
                     const actualHours = actualSeconds / 3600;
                     const netIncome = (p.estIncome || 0) - (p.cost || 0);
-                    const rate = Math.min(actualHours > 0 ? netIncome / actualHours : 0, p.estIncome || 0);
+                    const rawRate = actualHours > 0 ? netIncome / actualHours : 0;
+                    const rate = Math.min(rawRate, p.estIncome || 0);
                     const efficiency = (actualHours / (p.estHours || 1)) * 100;
                     const comment = efficiency > 120 ? "⚠️ 嚴重超時" : efficiency > 105 ? "🧐 稍微拖慢" : efficiency < 85 ? "✨ 效率極佳" : "✅ 穩定";
                     
-                    const phaseData = PHASES.map(ph => ({
-                        ...ph, seconds: pLogs.filter(l => l.phase === ph.id).reduce((a, c) => a + c.seconds, 0),
-                        percent: actualSeconds > 0 ? (pLogs.filter(l => l.phase === ph.id).reduce((a, c) => a + c.seconds, 0) / actualSeconds) * 100 : 0
-                    }));
+                    const phaseData = PHASES.map(ph => {
+                        const phSec = pLogs.filter(l => l.phase === ph.id).reduce((a, c) => a + (c.seconds || 0), 0);
+                        return { ...ph, percent: actualSeconds > 0 ? (phSec / actualSeconds) * 100 : 0 };
+                    });
 
                     const deadlineDate = p.deadline ? new Date(p.deadline) : null;
-                    const today = new Date(); today.setHours(0,0,0,0);
                     const isClosed = deadlineDate && deadlineDate < today;
 
                     return { 
@@ -302,12 +313,11 @@
                         netIncome, recentWork: [...pLogs].sort((a,b) => b.timestamp - a.timestamp).slice(0, 3), 
                         comment, isClosed 
                     };
-                });
-                return processed.sort((a, b) => new Date(b.projectDate) - new Date(a.projectDate));
+                }).sort((a, b) => new Date(b.projectDate) - new Date(a.projectDate));
             }, [logs, projects]);
 
             const activeProjectsDropdown = useMemo(() => {
-                return stats.filter(p => !p.isClosed).sort((a, b) => a.client.localeCompare(b.client, 'zh-Hant'));
+                return stats.filter(p => !p.isClosed).sort((a, b) => (a.client || "").localeCompare(b.client || "", 'zh-Hant'));
             }, [stats]);
 
             const archivedGroups = useMemo(() => {
@@ -322,15 +332,17 @@
                 return groups;
             }, [stats]);
 
-            if (isLoading && !user) return <div className="flex items-center justify-center h-screen text-slate-500 font-mono animate-pulse">Connecting Cloud...</div>;
+            const currentPhaseColor = useMemo(() => PHASES.find(p => p.id === activePhase)?.color || '#3b82f6', [activePhase]);
+
+            if (isLoading && !user) return <div className="flex items-center justify-center h-screen text-slate-500 font-mono animate-pulse uppercase tracking-[0.2em]">Connecting...</div>;
 
             const renderProjectCard = (p) => (
-                <div key={p.id} className="mobile-card p-6 space-y-5 shadow-2xl transition-all border-white/5 border hover:border-white/10 mb-4">
+                <div key={p.id} className="mobile-card p-6 space-y-5 shadow-2xl border-white/5 border mb-4">
                     <div className="flex justify-between items-start">
                         <div className="space-y-2 max-w-[65%]">
                             <div className="flex flex-wrap items-center gap-2">
                                 <span className="text-[9px] bg-blue-500/10 text-blue-400 font-bold px-2 py-0.5 rounded-lg border border-blue-500/20">{p.client}</span>
-                                <span className="text-[9px] text-slate-600 font-mono">{p.projectDate.substring(5).replace('-', '/')}</span>
+                                <span className="text-[9px] text-slate-600 font-mono">{p.projectDate?.substring(5).replace('-', '/')}</span>
                             </div>
                             <h3 className="text-lg font-bold text-white leading-tight tracking-tight">{p.name}</h3>
                         </div>
@@ -340,22 +352,22 @@
                                 {editingIncomeId === p.id ? (
                                     <div className="flex items-center gap-1 bg-black/50 p-1 rounded-lg border border-blue-500/50"><input type="number" autoFocus className="w-16 bg-transparent text-[10px] text-white outline-none font-bold" value={tempValue} onChange={e => setTempValue(e.target.value)} onBlur={() => updateProjectData(p.id, 'estIncome', parseFloat(tempValue) || 0)} onKeyDown={e => e.key === 'Enter' && updateProjectData(p.id, 'estIncome', parseFloat(tempValue) || 0)} /><button onClick={() => updateProjectData(p.id, 'estIncome', parseFloat(tempValue) || 0)} className="text-green-500"><Icon name="check" size={12}/></button></div>
                                 ) : (
-                                    <div className="flex items-center gap-1 cursor-pointer hover:opacity-80 group" onClick={() => { setEditingIncomeId(p.id); setTempValue(p.estIncome); }}><span className="text-[9px] text-slate-400 font-bold uppercase">預估收入: ${p.estIncome.toLocaleString()}</span><Icon name="edit" size={10} className="text-slate-700 group-hover:text-blue-500 transition-colors"/></div>
+                                    <div className="flex items-center gap-1 cursor-pointer hover:opacity-80 group" onClick={() => { setEditingIncomeId(p.id); setTempValue(p.estIncome); }}><span className="text-[9px] text-slate-400 font-bold uppercase">預估收入: ${p.estIncome?.toLocaleString()}</span><Icon name="edit" size={10} className="text-slate-700 group-hover:text-blue-500 transition-colors"/></div>
                                 )}
-                                <span className="text-[9px] text-slate-600 font-bold uppercase tracking-tighter">淨利: ${p.netIncome.toLocaleString()}</span>
+                                <span className="text-[9px] text-slate-600 font-bold uppercase tracking-tighter">淨利: ${p.netIncome?.toLocaleString()}</span>
                             </div>
                         </div>
                     </div>
-
                     <div className="space-y-4">
                         <div className="space-y-2">
                             <div className="flex justify-between text-[10px] font-bold uppercase">
-                                <span className="text-slate-500 flex items-center gap-1 font-mono">投入: {p.actualHours.toFixed(1)}h / {editingHoursId === p.id ? (<span className="inline-flex items-center gap-1 bg-black/50 px-1 rounded border border-blue-500/50"><input type="number" autoFocus className="w-10 bg-transparent text-white outline-none text-[10px]" value={tempValue} onChange={e => setTempValue(e.target.value)} onBlur={() => updateProjectData(p.id, 'estHours', parseFloat(tempValue) || 0)} onKeyDown={e => e.key === 'Enter' && updateProjectData(p.id, 'estHours', parseFloat(tempValue) || 0)} /><button onClick={() => updateProjectData(p.id, 'estHours', parseFloat(tempValue) || 0)} className="text-green-500"><Icon name="check" size={10}/></button></span>) : (<span className="cursor-pointer hover:text-blue-400 inline-flex items-center gap-1 group" onClick={() => { setEditingHoursId(p.id); setTempValue(p.estHours); }}>預計: {p.estHours}h <Icon name="edit" size={8} className="text-slate-700 group-hover:text-blue-500"/></span>)}</span>
-                                <span className={p.efficiency > 100 ? 'text-red-400' : 'text-blue-400'}>{p.efficiency.toFixed(0)}%</span>
+                                <span className="text-slate-500 flex items-center gap-1 font-mono">投入: {p.actualHours?.toFixed(1)}h / {editingHoursId === p.id ? (<span className="inline-flex items-center gap-1 bg-black/50 px-1 rounded border border-blue-500/50"><input type="number" autoFocus className="w-10 bg-transparent text-white outline-none text-[10px]" value={tempValue} onChange={e => setTempValue(e.target.value)} onBlur={() => updateProjectData(p.id, 'estHours', parseFloat(tempValue) || 0)} onKeyDown={e => e.key === 'Enter' && updateProjectData(p.id, 'estHours', parseFloat(tempValue) || 0)} /><button onClick={() => updateProjectData(p.id, 'estHours', parseFloat(tempValue) || 0)} className="text-green-500"><Icon name="check" size={10}/></button></span>) : (<span className="cursor-pointer hover:text-blue-400 inline-flex items-center gap-1 group" onClick={() => { setEditingHoursId(p.id); setTempValue(p.estHours); }}>預計: {p.estHours}h <Icon name="edit" size={8} className="text-slate-700 group-hover:text-blue-500"/></span>)}</span>
+                                <span className={p.efficiency > 100 ? 'text-red-400' : 'text-blue-400'}>{p.efficiency?.toFixed(0)}%</span>
                             </div>
                             <div className="h-2.5 bg-black rounded-full overflow-hidden flex border border-white/5 shadow-inner">
                                 {p.phaseData.map(ph => ph.percent > 0 && (<div key={ph.id} style={{ width: `${ph.percent}%`, backgroundColor: ph.color }} className="h-full border-r border-black/20 last:border-0" />))}
                             </div>
+                            {/* 工作環節統計 */}
                             <div className="grid grid-cols-2 gap-2 mt-4">
                                 {p.phaseData.filter(ph => ph.percent > 0).map(ph => (
                                     <div key={ph.id} className="bg-black/20 p-2.5 rounded-xl flex items-center justify-between border border-white/5 shadow-sm">
@@ -372,7 +384,7 @@
                                     <input type="date" autoFocus className="bg-black border border-blue-500/50 text-[10px] rounded p-1 text-blue-400 outline-none" value={tempValue} onChange={e => setTempValue(e.target.value)} onBlur={() => updateProjectData(p.id, 'deadline', tempValue)} />
                                 ) : (
                                     p.isClosed ? (
-                                        <span onClick={() => { setEditingDeadlineId(p.id); setTempValue(p.deadline); }} className="text-[10px] font-bold px-3 py-1.5 rounded-xl bg-slate-800 text-slate-500 flex items-center gap-2 cursor-pointer border border-white/5"><Icon name="archive" size={12} /> 已結案 (截稿: {p.deadline.substring(5)})</span>
+                                        <span onClick={() => { setEditingDeadlineId(p.id); setTempValue(p.deadline); }} className="text-[10px] font-bold px-3 py-1.5 rounded-xl bg-slate-800 text-slate-500 flex items-center gap-2 cursor-pointer border border-white/5"><Icon name="archive" size={12} /> 已結案 (截稿: {p.deadline?.substring(5)})</span>
                                     ) : (
                                         p.deadline ? (
                                             <span onClick={() => { setEditingDeadlineId(p.id); setTempValue(p.deadline); }} className={`text-[10px] font-bold px-3 py-1.5 rounded-xl flex items-center gap-2 cursor-pointer hover:opacity-80 transition-all ${p.daysLeft < 3 ? 'bg-red-500/20 text-red-400 animate-pulse' : 'bg-white/5 text-slate-400'}`}><Icon name="calendar" size={12} /> 截稿: {p.deadline.substring(5)} ({p.daysLeft}天) <Icon name="edit" size={8} /></span>
@@ -380,7 +392,7 @@
                                     )
                                 )}
                             </div>
-                            <button onClick={async () => { if(confirm("確定刪除專案？")) { const storageUid = syncKey ? `shared_${syncKey}` : user.uid; await db.collection(`artifacts/${appId}/users/${storageUid}/projects`).doc(p.id).delete(); } }} className="p-2.5 text-slate-700 hover:text-red-500 active:scale-90 transition-all"><Icon name="trash-2" size={18}/></button>
+                            <button onClick={async () => { if(confirm("確定刪除專案？")) { const storageUid = syncKey ? `shared_${syncKey}` : user.uid; await db.collection(`artifacts/${appId}/users/${storageUid}/projects`).doc(p.id).delete(); } }} className="p-2.5 text-slate-700 hover:text-red-500 transition-all"><Icon name="trash-2" size={18}/></button>
                         </div>
                     </div>
                 </div>
@@ -393,9 +405,9 @@
                         <div className="fixed inset-0 z-[100] flex items-center justify-center bg-black/95 backdrop-blur-xl p-6">
                             <div className="mobile-card p-8 w-full max-w-xs text-center border-2 border-blue-500 shadow-2xl animate-alert">
                                 <Icon name="heart-pulse" size={64} className="text-blue-500 mx-auto mb-6 animate-pulse" />
-                                <h2 className="text-2xl font-bold text-white mb-2 tracking-tight">該休息囉！</h2>
-                                <p className="text-slate-400 text-sm mb-8 leading-relaxed">已連續專注 50 分鐘。為了保護眼睛與肩膀，請起來活動筋骨，遠眺 20 秒。</p>
-                                <button onClick={() => setShowBreakAlert(false)} className="w-full py-5 bg-blue-600 hover:bg-blue-500 text-white rounded-2xl font-bold shadow-xl">收到，去休息</button>
+                                <h2 className="text-2xl font-bold text-white mb-2">該休息囉！</h2>
+                                <p className="text-slate-400 text-sm mb-8 leading-relaxed">已連續專注 50 分鐘。為了保護眼睛與肩膀，請起來活動筋骨，遠眺休息。</p>
+                                <button onClick={() => setShowBreakAlert(false)} className="w-full py-5 bg-blue-600 text-white rounded-2xl font-bold shadow-xl">收到，去休息</button>
                             </div>
                         </div>
                     )}
@@ -410,17 +422,17 @@
                             <div className="mobile-card p-7 w-full max-w-xs space-y-5 shadow-2xl">
                                 <h2 className="text-white font-bold flex items-center gap-2 text-lg justify-center"><Icon name="settings" size={20} color="#3b82f6"/> 系統設定</h2>
                                 <div className="space-y-4 pt-2">
-                                    <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase">跨裝置同步 ID</label><input type="text" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none" value={syncKey} onChange={e => setSyncKey(e.target.value)} /></div>
-                                    <div className="space-y-1.5"><label className="text-[10px] text-blue-500 font-bold uppercase flex items-center gap-1"><Icon name="share" size={10}/> Notion 自動化 Webhook</label><input type="text" placeholder="https://hook.make.com/..." className="w-full bg-black border border-blue-900/30 p-4 rounded-2xl text-white outline-none" value={notionUrl} onChange={e => setNotionUrl(e.target.value)} /></div>
+                                    <div className="space-y-1.5"><label className="text-[10px] text-slate-500 font-bold uppercase">同步 ID</label><input type="text" className="w-full bg-black border border-white/10 p-4 rounded-2xl text-white outline-none" value={syncKey} onChange={e => setSyncKey(e.target.value)} /></div>
+                                    <div className="space-y-1.5"><label className="text-[10px] text-blue-500 font-bold uppercase">Notion Webhook</label><input type="text" placeholder="https://..." className="w-full bg-black border border-blue-900/30 p-4 rounded-2xl text-white outline-none" value={notionUrl} onChange={e => setNotionUrl(e.target.value)} /></div>
                                 </div>
-                                <div className="flex gap-2 pt-2"><button onClick={() => { localStorage.setItem('yt_editor_sync_id', syncKey); localStorage.setItem('notion_webhook_url', notionUrl); window.location.reload(); }} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-bold">儲存並重啟</button><button onClick={() => setShowSyncModal(false)} className="flex-1 py-4 bg-white/10 text-slate-300 rounded-2xl">關閉</button></div>
+                                <div className="flex gap-2 pt-2"><button onClick={() => { localStorage.setItem('yt_editor_sync_id', syncKey); localStorage.setItem('notion_webhook_url', notionUrl); window.location.reload(); }} className="flex-1 py-4 bg-blue-600 text-white rounded-2xl font-bold">儲存重啟</button><button onClick={() => setShowSyncModal(false)} className="flex-1 py-4 bg-white/10 text-slate-300 rounded-2xl">關閉</button></div>
                             </div>
                         </div>
                     )}
 
                     <div className="mobile-card p-4 sm:p-6 space-y-6 shadow-2xl border-white/5 border-2">
                         <div className="space-y-4">
-                            <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">執行專案 (依業主排序)</label><select className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white outline-none focus:ring-2 ring-blue-500 appearance-none shadow-inner" value={activeProjectId} onChange={e => setActiveProjectId(e.target.value)} disabled={activeSession?.isRunning}><option value="">-- 選擇專案 --</option>{activeProjectsDropdown.map(p => <option key={p.id} value={p.id}>{p.client} | {p.name}</option>)}</select></div>
+                            <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">選擇專案 (依業主排序)</label><select className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white outline-none focus:ring-2 ring-blue-500 appearance-none shadow-inner" value={activeProjectId} onChange={e => setActiveProjectId(e.target.value)} disabled={activeSession?.isRunning}><option value="">-- 點選專案 --</option>{activeProjectsDropdown.map(p => <option key={p.id} value={p.id}>{p.client} | {p.name}</option>)}</select></div>
                             <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">工作環節</label><div className="grid grid-cols-2 gap-2">{PHASES.map(ph => <button key={ph.id} onClick={() => setActivePhase(ph.id)} disabled={activeSession?.isRunning} style={activePhase === ph.id ? { borderColor: ph.color, backgroundColor: `${ph.color}20`, color: ph.color } : {}} className={`text-[11px] py-3.5 rounded-2xl border border-white/5 bg-white/5 text-slate-500 btn-active ${activePhase === ph.id ? 'font-bold' : ''}`}>{ph.name}</button>)}</div></div>
                         </div>
                         <div className="text-center space-y-5 py-8 px-2 bg-black/40 rounded-[36px] border border-white/5 shadow-inner">
@@ -428,15 +440,16 @@
                             <div className="px-3 space-y-3">
                                 {(!activeSession || !activeSession.isRunning) ? <button onClick={startTimer} style={{ backgroundColor: activeProjectId ? currentPhaseColor : '#334155' }} className="w-full py-5 text-white rounded-[24px] font-bold text-lg sm:text-xl shadow-xl flex items-center justify-center gap-3 btn-active"><Icon name="play" fill="currentColor" size={24} /> 開始計時</button>
                                 : <button onClick={pauseTimer} className="w-full py-5 bg-orange-600/90 text-white rounded-[24px] font-bold text-lg sm:text-xl btn-active flex items-center justify-center gap-3"><Icon name="pause" fill="currentColor" size={24} /> 休息一下</button>}
-                                {displaySeconds > 0 && <button onClick={stopTimer} className="w-full py-2 text-red-500 text-[11px] font-bold uppercase tracking-[0.3em] opacity-80 hover:opacity-100 transition-opacity">結束並存檔 {notionUrl && '→ Notion'}</button>}
+                                {displaySeconds > 0 && <button onClick={stopTimer} className="w-full py-2 text-red-500 text-[11px] font-bold uppercase tracking-[0.3em] opacity-80 hover:opacity-100">結束存檔</button>}
                             </div>
                         </div>
+                        <div className="flex items-center gap-3 bg-black/30 p-4 rounded-2xl border border-white/5 shadow-inner mx-1"><Icon name="message-square" size={16} className="text-slate-600" /><input type="text" placeholder="本次筆記..." className="bg-transparent text-xs text-slate-300 outline-none w-full" value={sessionNote} onChange={e => setSessionNote(e.target.value)} /></div>
                     </div>
 
                     <div className="grid grid-cols-3 gap-2">
                         <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold mb-1 uppercase">本日肝片</span><span className="text-lg font-bold text-orange-400 font-mono">{todayHours}h</span></div>
-                        <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold mb-1 uppercase">平均時薪</span><span className="text-lg font-bold text-green-400 font-mono">${stats.length > 0 ? Math.round(stats.reduce((a, b) => a + b.actualHourlyRate, 0) / stats.length) : 0}</span></div>
-                        <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold mb-1 uppercase">總淨利</span><span className="text-lg font-bold text-blue-400 font-mono">${stats.reduce((a, b) => a + b.netIncome, 0).toLocaleString()}</span></div>
+                        <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold mb-1 uppercase">平均時薪</span><span className="text-lg font-bold text-green-400 font-mono">${stats.length > 0 ? Math.round(stats.reduce((a, b) => a + (b.actualHourlyRate || 0), 0) / stats.length) : 0}</span></div>
+                        <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold mb-1 uppercase">總淨利</span><span className="text-lg font-bold text-blue-400 font-mono">${stats.reduce((a, b) => a + (b.netIncome || 0), 0).toLocaleString()}</span></div>
                     </div>
 
                     <div className="space-y-4">
@@ -450,7 +463,7 @@
                         <div className="pt-6 space-y-4">
                             <h2 className="text-sm font-bold text-slate-700 uppercase tracking-widest px-1 flex items-center gap-2"><Icon name="archive" size={14} color="#64748b" /> 歷程存檔 (已結案)</h2>
                             {Object.keys(archivedGroups).length === 0 ? (
-                                <div className="text-[10px] text-slate-800 text-center uppercase py-4 font-bold tracking-widest">尚無結案數據</div>
+                                <div className="text-[10px] text-slate-800 text-center uppercase py-4 font-bold tracking-widest opacity-50">尚無結案數據</div>
                             ) : (
                                 Object.keys(archivedGroups).sort((a,b) => b.localeCompare(a)).map(month => (
                                     <div key={month} className="space-y-2">
@@ -458,7 +471,7 @@
                                             <span className="text-xs font-bold text-slate-400 flex items-center gap-2"><Icon name="calendar" size={12} /> {month}</span>
                                             <div className="flex items-center gap-3"><span className="text-[10px] bg-slate-800 text-slate-500 px-2 py-0.5 rounded-lg">{archivedGroups[month].length} 專案</span><Icon name={expandedMonth === month ? "chevron-up" : "chevron-down"} size={14} color="#475569" /></div>
                                         </button>
-                                        {expandedMonth === month && (<div className="space-y-3 animate-in fade-in slide-in-from-top-2 duration-300">{archivedGroups[month].map(p => renderProjectCard(p))}</div>)}
+                                        {expandedMonth === month && (<div className="space-y-3">{archivedGroups[month].map(p => renderProjectCard(p))}</div>)}
                                     </div>
                                 ))
                             )}
@@ -479,7 +492,7 @@
                             <button onClick={addProject} className="w-full py-5 rounded-[24px] font-bold text-lg shadow-xl btn-active mt-2 bg-blue-600 text-white transition-all">建立計畫</button>
                         </div>
                     </div>
-                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v6.8 • Notion Sync Edition</footer>
+                    <footer className="text-center py-12 opacity-20 text-[9px] uppercase tracking-[0.4em] font-mono">YT Master Logic v6.9 • Persistence & Fix Ready</footer>
                 </div>
             );
         }
