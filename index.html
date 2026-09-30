@@ -296,6 +296,156 @@
                 finally { setIsAdding(false); }
             };
 
+            // === 匯出輔助函式 ===
+            const downloadBlobFile = (content, fileName, mimeType) => {
+                const blob = new Blob([content], { type: mimeType });
+                const url = URL.createObjectURL(blob);
+                const link = document.createElement('a');
+                link.href = url;
+                link.download = fileName;
+                document.body.appendChild(link);
+                link.click();
+                document.body.removeChild(link);
+                URL.revokeObjectURL(url);
+            };
+
+            // 1. 匯出給 ChatGPT 分析 (JSON)
+            const handleExportChatGPT = () => {
+                const todayStr = new Date().toISOString().split('T')[0];
+                const projectMap = {};
+                projects.forEach(p => { projectMap[p.id] = p; });
+
+                let totalWorkSeconds = 0;
+                const dailyMap = {};
+                const projectSummaryMap = {};
+
+                const sessionList = logs.map(log => {
+                    const sec = Number(log.seconds) || 0;
+                    const mins = Math.round(sec / 60);
+                    const p = projectMap[log.projectId] || {};
+                    const projectName = p.name || '未分類專案';
+                    const phaseObj = PHASES.find(ph => ph.id === log.phase);
+                    const taskTypeName = phaseObj ? phaseObj.name : (log.phase || '未分類');
+                    const logDate = (log.date || '').split('T')[0] || todayStr;
+
+                    totalWorkSeconds += sec;
+
+                    if (!dailyMap[logDate]) {
+                        dailyMap[logDate] = { date: logDate, totalWorkMinutes: 0, totalWorkHours: 0, sessionCount: 0 };
+                    }
+                    dailyMap[logDate].totalWorkMinutes += mins;
+                    dailyMap[logDate].sessionCount += 1;
+
+                    if (!projectSummaryMap[projectName]) {
+                        projectSummaryMap[projectName] = { projectName, totalWorkMinutes: 0, totalWorkHours: 0, sessionCount: 0 };
+                    }
+                    projectSummaryMap[projectName].totalWorkMinutes += mins;
+                    projectSummaryMap[projectName].sessionCount += 1;
+
+                    return {
+                        id: log.id || '',
+                        date: log.date || '',
+                        projectName: projectName,
+                        taskType: taskTypeName,
+                        startTime: log.displayStartTime || '',
+                        endTime: log.displayEndTime || '',
+                        durationMinutes: mins,
+                        durationSeconds: sec,
+                        videoProgress: {
+                            startTimecode: '',
+                            endTimecode: '',
+                            completedSeconds: 0
+                        },
+                        notes: log.note || ''
+                    };
+                });
+
+                const dailySummary = Object.values(dailyMap).map(d => ({
+                    ...d,
+                    totalWorkHours: Number((d.totalWorkMinutes / 60).toFixed(2))
+                })).sort((a, b) => b.date.localeCompare(a.date));
+
+                const projectSummary = Object.values(projectSummaryMap).map(p => ({
+                    ...p,
+                    totalWorkHours: Number((p.totalWorkMinutes / 60).toFixed(2))
+                })).sort((a, b) => b.totalWorkMinutes - a.totalWorkMinutes);
+
+                const exportPayload = {
+                    exportInfo: {
+                        exportDate: todayStr,
+                        source: "my-yt-tracker",
+                        version: "1.0"
+                    },
+                    summary: {
+                        totalSessions: sessionList.length,
+                        totalWorkMinutes: Math.round(totalWorkSeconds / 60),
+                        totalWorkHours: Number((totalWorkSeconds / 3600).toFixed(2)),
+                        dailySummary: dailySummary,
+                        projectSummary: projectSummary
+                    },
+                    sessions: sessionList,
+                    rawData: {
+                        projects: projects,
+                        logs: logs
+                    }
+                };
+
+                const fileName = `chatgpt-work-tracker-${todayStr}.json`;
+                downloadBlobFile(JSON.stringify(exportPayload, null, 2), fileName, 'application/json;charset=utf-8;');
+            };
+
+            // 2. 匯出 CSV (UTF-8 帶 BOM)
+            const handleExportCSV = () => {
+                const todayStr = new Date().toISOString().split('T')[0];
+                const projectMap = {};
+                projects.forEach(p => { projectMap[p.id] = p; });
+
+                const headers = [
+                    'date',
+                    'projectName',
+                    'taskType',
+                    'startTime',
+                    'endTime',
+                    'durationMinutes',
+                    'startTimecode',
+                    'endTimecode',
+                    'completedSeconds',
+                    'notes'
+                ];
+
+                const escapeCSV = (field) => {
+                    if (field === null || field === undefined) return '""';
+                    const text = String(field).replace(/"/g, '""');
+                    return `"${text}"`;
+                };
+
+                const rows = logs.map(log => {
+                    const sec = Number(log.seconds) || 0;
+                    const mins = Math.round(sec / 60);
+                    const p = projectMap[log.projectId] || {};
+                    const phaseObj = PHASES.find(ph => ph.id === log.phase);
+                    const taskTypeName = phaseObj ? phaseObj.name : (log.phase || '');
+                    const logDate = (log.date || '').split('T')[0] || todayStr;
+
+                    return [
+                        escapeCSV(logDate),
+                        escapeCSV(p.name || '未分類專案'),
+                        escapeCSV(taskTypeName),
+                        escapeCSV(log.displayStartTime || ''),
+                        escapeCSV(log.displayEndTime || ''),
+                        escapeCSV(mins),
+                        escapeCSV(''),
+                        escapeCSV(''),
+                        escapeCSV(0),
+                        escapeCSV(log.note || '')
+                    ].join(',');
+                });
+
+                const csvContent = '\uFEFF' + [headers.join(','), ...rows].join('\r\n');
+                const fileName = `work-tracker-${todayStr}.csv`;
+                downloadBlobFile(csvContent, fileName, 'text/csv;charset=utf-8;');
+            };
+
             const todayHours = useMemo(() => {
                 const todayStr = new Date().toISOString().split('T')[0];
                 const seconds = logs
@@ -466,10 +616,21 @@
                         <div className="flex items-center gap-3 bg-black/30 p-4 rounded-2xl border border-white/5 shadow-inner mx-1"><Icon name="message-square" size={16} className="text-slate-600" /><input type="text" placeholder="本次筆記..." className="bg-transparent text-xs text-slate-300 outline-none w-full" value={sessionNote} onChange={e => setSessionNote(e.target.value)} /></div>
                     </div>
 
+                    {/* 數據小卡片 */}
                     <div className="grid grid-cols-3 gap-2">
                         <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold mb-1 uppercase">本日肝片</span><span className="text-lg font-bold text-orange-400 font-mono">{todayHours}h</span></div>
                         <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold mb-1 uppercase">平均時薪</span><span className="text-lg font-bold text-green-400 font-mono">${stats.length > 0 ? Math.round(stats.reduce((a, b) => a + (b.actualHourlyRate || 0), 0) / stats.length) : 0}</span></div>
                         <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold mb-1 uppercase">總淨利</span><span className="text-lg font-bold text-blue-400 font-mono">${stats.reduce((a, b) => a + (b.netIncome || 0), 0).toLocaleString()}</span></div>
+                    </div>
+
+                    {/* 匯出功能按鈕區 */}
+                    <div className="mobile-card p-4 flex gap-3 shadow-lg border-white/5">
+                        <button onClick={handleExportChatGPT} className="flex-1 py-3.5 px-3 bg-emerald-600/90 hover:bg-emerald-600 text-white rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 btn-active shadow-md transition-colors">
+                            <span>📊 匯出給 ChatGPT</span>
+                        </button>
+                        <button onClick={handleExportCSV} className="flex-1 py-3.5 px-3 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 btn-active border border-white/5 transition-colors">
+                            <span>📥 匯出 CSV</span>
+                        </button>
                     </div>
 
                     <div className="space-y-4">
