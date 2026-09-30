@@ -60,15 +60,14 @@
             return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
         };
 
-        // Timecode 轉換與格式驗證工具 (支援 MM:SS 或 HH:MM:SS)
         const parseTimecodeToSeconds = (tc) => {
             if (!tc || typeof tc !== 'string') return null;
             const parts = tc.trim().split(':').map(p => Number(p));
             if (parts.some(p => isNaN(p) || p < 0)) return null;
             if (parts.length === 2) {
-                return parts[0] * 60 + parts[1]; // MM:SS
+                return parts[0] * 60 + parts[1];
             } else if (parts.length === 3) {
-                return parts[0] * 3600 + parts[1] * 60 + parts[2]; // HH:MM:SS
+                return parts[0] * 3600 + parts[1] * 60 + parts[2];
             }
             return null;
         };
@@ -149,7 +148,7 @@
             const [activePhase, setActivePhase] = useState(PHASES[0].id);
             const [sessionNote, setSessionNote] = useState('');
 
-            // --- 新增 Timecode 狀態 ---
+            // Timecode 狀態
             const [startTimecode, setStartTimecode] = useState('');
             const [showEndTcModal, setShowEndTcModal] = useState(false);
             const [endTimecode, setEndTimecode] = useState('');
@@ -258,8 +257,8 @@
                 const storageUid = syncKey ? `shared_${syncKey}` : user.uid;
                 await db.collection(`artifacts/${appId}/users/${storageUid}/activeSession`).doc('current').set({
                     projectId: activeProjectId, phase: activePhase, isRunning: true,
-                    startTime: Date.now(), baseTime: displaySeconds, note: sessionNote,
-                    startTimecode: startTimecode.trim(),
+                    startTime: Date.now(), baseTime: displaySeconds, note: sessionNote || "",
+                    startTimecode: (startTimecode || "").trim(),
                     sessionStartTimeStr: activeSession?.sessionStartTimeStr || new Date().toISOString()
                 });
             };
@@ -272,7 +271,6 @@
                 });
             };
 
-            // 儲存 session 的核心函式
             const commitSession = async (videoProgressData) => {
                 if (displaySeconds === 0 || !activeSession) return;
                 const storageUid = syncKey ? `shared_${syncKey}` : user.uid;
@@ -286,20 +284,19 @@
                 const finalHoursDecimal = parseFloat((finalSeconds / 3600).toFixed(2));
                 const durationTextStr = hrs > 0 ? `${hrs}h ${remainingMins}m` : `${remainingMins}m`;
 
-                const cleanProgress = videoProgressData || {
-                    startTimecode: "",
-                    endTimecode: "",
-                    completedSeconds: 0,
-                    minutesPerFinishedMinute: null,
-                    finishedSecondsPerWorkHour: null
+                const cleanProgress = {
+                    startTimecode: (videoProgressData?.startTimecode || "").trim(),
+                    endTimecode: (videoProgressData?.endTimecode || "").trim(),
+                    completedSeconds: Number(videoProgressData?.completedSeconds) || 0,
+                    minutesPerFinishedMinute: videoProgressData?.minutesPerFinishedMinute !== undefined ? videoProgressData.minutesPerFinishedMinute : null,
+                    finishedSecondsPerWorkHour: videoProgressData?.finishedSecondsPerWorkHour !== undefined ? videoProgressData.finishedSecondsPerWorkHour : null
                 };
 
                 try { 
-                    // 1. 本地 Firebase 存檔 (包含完整的 videoProgress)
                     await db.collection(`artifacts/${appId}/users/${storageUid}/logs`).add({ 
                         projectId: activeSession.projectId, 
                         phase: activeSession.phase, 
-                        note: sessionNote, 
+                        note: sessionNote || "", 
                         seconds: finalSeconds, 
                         date: new Date().toISOString(), 
                         timestamp: Date.now(), 
@@ -308,7 +305,6 @@
                         videoProgress: cleanProgress
                     }); 
                     
-                    // 2. 發送給 Notion Webhook
                     if (notionUrl && notionUrl.startsWith('http')) {
                         const payload = { 
                             project: String(targetProject?.name || '未知專案'), 
@@ -339,21 +335,17 @@
                 } catch (err) { alert("存檔失敗: " + err.message); }
             };
 
-            // 點擊「結束並存檔」時的進入點
             const stopTimer = () => {
                 if (displaySeconds === 0 || !activeSession) return;
-                // 如果開始時有填寫開始 Timecode，彈窗提示輸入結束 Timecode
                 if (activeSession.startTimecode && activeSession.startTimecode.trim() !== '') {
                     setEndTimecode('');
                     setTcWarning('');
                     setShowEndTcModal(true);
                 } else {
-                    // 若無填寫開始 Timecode，直接儲存不打擾
                     commitSession(null);
                 }
             };
 
-            // 確認 Timecode 並存檔
             const handleConfirmProgressAndSave = () => {
                 const startSec = parseTimecodeToSeconds(activeSession.startTimecode);
                 const endSec = parseTimecodeToSeconds(endTimecode);
@@ -374,9 +366,7 @@
                 let finishedSecondsPerWorkHour = null;
 
                 if (diffSec > 0 && workMinutes > 0) {
-                    // 公式：實際工作分鐘 ÷（完成秒數 ÷ 60）
                     minutesPerFinishedMinute = Number((workMinutes / (diffSec / 60)).toFixed(2));
-                    // 公式：完成秒數 ÷（工作分鐘 ÷ 60）
                     finishedSecondsPerWorkHour = Number((diffSec / (workMinutes / 60)).toFixed(2));
                 }
 
@@ -413,7 +403,6 @@
                 finally { setIsAdding(false); }
             };
 
-            // === 匯出輔助函式 ===
             const downloadBlobFile = (content, fileName, mimeType) => {
                 const blob = new Blob([content], { type: mimeType });
                 const url = URL.createObjectURL(blob);
@@ -426,7 +415,6 @@
                 URL.revokeObjectURL(url);
             };
 
-            // 1. 匯出給 ChatGPT 分析 (JSON)
             const handleExportChatGPT = () => {
                 const todayStr = new Date().toISOString().split('T')[0];
                 const projectMap = {};
@@ -451,21 +439,18 @@
 
                     totalWorkSeconds += sec;
 
-                    // 每日統計
                     if (!dailyMap[logDate]) {
                         dailyMap[logDate] = { date: logDate, totalWorkMinutes: 0, totalWorkHours: 0, sessionCount: 0 };
                     }
                     dailyMap[logDate].totalWorkMinutes += mins;
                     dailyMap[logDate].sessionCount += 1;
 
-                    // 專案統計
                     if (!projectSummaryMap[projectName]) {
                         projectSummaryMap[projectName] = { projectName, totalWorkMinutes: 0, totalWorkHours: 0, sessionCount: 0 };
                     }
                     projectSummaryMap[projectName].totalWorkMinutes += mins;
                     projectSummaryMap[projectName].sessionCount += 1;
 
-                    // 容錯提取 videoProgress
                     const vp = log.videoProgress || {
                         startTimecode: "",
                         endTimecode: "",
@@ -510,7 +495,6 @@
                     totalWorkHours: Number((p.totalWorkMinutes / 60).toFixed(2))
                 })).sort((a, b) => b.totalWorkMinutes - a.totalWorkMinutes);
 
-                // 加權平均效率計算（總工作分鐘 ÷ (總完成秒數 / 60)）
                 let averageMinutesPerFinishedMinute = null;
                 let averageFinishedSecondsPerWorkHour = null;
                 if (totalCompletedSeconds > 0 && totalWorkMinutesForProgressSessions > 0) {
@@ -549,7 +533,6 @@
                 downloadBlobFile(JSON.stringify(exportPayload, null, 2), fileName, 'application/json;charset=utf-8;');
             };
 
-            // 2. 匯出 CSV (UTF-8 帶 BOM)
             const handleExportCSV = () => {
                 const todayStr = new Date().toISOString().split('T')[0];
                 const projectMap = {};
@@ -702,7 +685,6 @@
                             </div>
                         </div>
 
-                        {/* 近期工作進度紀錄 (含 Timecode 與效率指標) */}
                         {p.recentWork && p.recentWork.length > 0 && (
                             <div className="space-y-1.5 pt-2 border-t border-white/5">
                                 <div className="text-[9px] text-slate-500 font-bold uppercase tracking-wider">近期工作進度</div>
@@ -710,7 +692,7 @@
                                     const vp = rw.videoProgress;
                                     const hasProgress = vp && vp.completedSeconds > 0;
                                     return (
-                                        <div key={rw.id || rw.timestamp} className="text-[10px] text-slate-400 bg-black/30 p-2 rounded-xl flex flex-wrap items-center justify-between gap-1 border border-white/5">
+                                        <div key={rw.id || rw.timestamp || Math.random()} className="text-[10px] text-slate-400 bg-black/30 p-2 rounded-xl flex flex-wrap items-center justify-between gap-1 border border-white/5">
                                             <div className="flex items-center gap-1.5 truncate">
                                                 <span className="text-slate-500 font-mono">{rw.date?.substring(5, 10).replace('-', '/')}</span>
                                                 <span className="font-semibold text-slate-300">{PHASES.find(ph => ph.id === rw.phase)?.name || rw.phase}</span>
@@ -725,7 +707,7 @@
                                                 <span>{Math.round((rw.seconds || 0) / 60)}m</span>
                                                 {hasProgress && vp.minutesPerFinishedMinute && (
                                                     <span className="text-emerald-400 font-bold">
-                                                        ({(vp.minutesPerFinishedMinute / 60).toFixed(1)}h/成片分)
+                                                        ({(Number(vp.minutesPerFinishedMinute) / 60).toFixed(1)}h/成片分)
                                                     </span>
                                                 )}
                                             </div>
@@ -756,18 +738,19 @@
                 </div>
             );
 
-            // 即時計算彈窗內的預覽數值
-            const previewMetrics = useMemo(() => {
-                if (!activeSession?.startTimecode || !endTimecode) return null;
+            // 即時計算彈窗內的預覽數值（純 JS 運算，保證 Hook 調用順序安全）
+            let previewMetrics = null;
+            if (activeSession?.startTimecode && endTimecode) {
                 const s = parseTimecodeToSeconds(activeSession.startTimecode);
                 const e = parseTimecodeToSeconds(endTimecode);
-                if (s === null || e === null || e < s) return null;
-                const diff = e - s;
-                const workMinutes = displaySeconds / 60;
-                const minsPerFinMin = diff > 0 && workMinutes > 0 ? (workMinutes / (diff / 60)).toFixed(1) : null;
-                const finSecPerHour = diff > 0 && workMinutes > 0 ? (diff / (workMinutes / 60)).toFixed(1) : null;
-                return { diff, minsPerFinMin, finSecPerHour };
-            }, [activeSession?.startTimecode, endTimecode, displaySeconds]);
+                if (s !== null && e !== null && e >= s) {
+                    const diff = e - s;
+                    const workMinutes = displaySeconds / 60;
+                    const minsPerFinMin = diff > 0 && workMinutes > 0 ? (workMinutes / (diff / 60)).toFixed(1) : null;
+                    const finSecPerHour = diff > 0 && workMinutes > 0 ? (diff / (workMinutes / 60)).toFixed(1) : null;
+                    previewMetrics = { diff, minsPerFinMin, finSecPerHour };
+                }
+            }
 
             return (
                 <div className="max-w-md mx-auto px-4 py-6 space-y-6 pb-24 relative">
@@ -783,7 +766,6 @@
                         </div>
                     )}
 
-                    {/* 結束計時的 Timecode 輸入彈窗 */}
                     {showEndTcModal && (
                         <div className="fixed inset-0 z-50 bg-black/90 flex items-center justify-center p-6 backdrop-blur-md">
                             <div className="mobile-card p-6 w-full max-w-xs space-y-5 shadow-2xl border border-blue-500/30">
@@ -875,7 +857,6 @@
                             <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">選擇專案 (依業主排序)</label><select className="w-full bg-black border border-white/10 rounded-2xl p-4 text-white outline-none focus:ring-2 ring-blue-500 appearance-none shadow-inner" value={activeProjectId} onChange={e => setActiveProjectId(e.target.value)} disabled={activeSession?.isRunning}><option value="">-- 點選專案 --</option>{activeProjectsDropdown.map(p => <option key={p.id} value={p.id}>{p.client} | {p.name}</option>)}</select></div>
                             <div className="space-y-1.5 px-1"><label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">工作環節</label><div className="grid grid-cols-2 gap-2">{PHASES.map(ph => <button key={ph.id} onClick={() => setActivePhase(ph.id)} disabled={activeSession?.isRunning} style={activePhase === ph.id ? { borderColor: ph.color, backgroundColor: `${ph.color}20`, color: ph.color } : {}} className={`text-[11px] py-3.5 rounded-2xl border border-white/5 bg-white/5 text-slate-500 btn-active ${activePhase === ph.id ? 'font-bold' : ''}`}>{ph.name}</button>)}</div></div>
                             
-                            {/* 開始 Timecode 欄位（選填） */}
                             <div className="space-y-1.5 px-1">
                                 <div className="flex justify-between items-center">
                                     <label className="text-[10px] font-bold text-slate-500 uppercase tracking-widest block">開始 Timecode (影片目前進度)</label>
@@ -903,14 +884,12 @@
                         <div className="flex items-center gap-3 bg-black/30 p-4 rounded-2xl border border-white/5 shadow-inner mx-1"><Icon name="message-square" size={16} className="text-slate-600" /><input type="text" placeholder="本次筆記..." className="bg-transparent text-xs text-slate-300 outline-none w-full" value={sessionNote} onChange={e => setSessionNote(e.target.value)} /></div>
                     </div>
 
-                    {/* 數據小卡片 */}
                     <div className="grid grid-cols-3 gap-2">
                         <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold mb-1 uppercase">本日肝片</span><span className="text-lg font-bold text-orange-400 font-mono">{todayHours}h</span></div>
                         <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold mb-1 uppercase">平均時薪</span><span className="text-lg font-bold text-green-400 font-mono">${stats.length > 0 ? Math.round(stats.reduce((a, b) => a + (b.actualHourlyRate || 0), 0) / stats.length) : 0}</span></div>
                         <div className="mobile-card p-3 flex flex-col justify-center items-center border-white/5 shadow-lg"><span className="text-[8px] text-slate-500 font-bold mb-1 uppercase">總淨利</span><span className="text-lg font-bold text-blue-400 font-mono">${stats.reduce((a, b) => a + (b.netIncome || 0), 0).toLocaleString()}</span></div>
                     </div>
 
-                    {/* 匯出功能按鈕區 */}
                     <div className="mobile-card p-4 flex gap-3 shadow-lg border-white/5">
                         <button onClick={handleExportChatGPT} className="flex-1 py-3.5 px-3 bg-emerald-600/90 hover:bg-emerald-600 text-white rounded-2xl font-bold text-xs flex items-center justify-center gap-1.5 btn-active shadow-md transition-colors">
                             <span>📊 匯出給 ChatGPT</span>
